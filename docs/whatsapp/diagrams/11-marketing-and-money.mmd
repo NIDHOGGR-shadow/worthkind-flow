@@ -1,0 +1,25 @@
+flowchart TD
+  Source["Hotel website / QR / Google Business / permitted Click-to-WhatsApp ad"]
+  WA["Guest opens WhatsApp business chat"]
+  Referral["Capture campaign/deep-link referral only where present; privacy and consent"]
+  Conversation["Service conversation, guest enquiry, human or AI optional"]
+  Outcome{"Hotel source proves a business event?"}
+  Pending["Enquiry only / follow-up pending"]
+  Verified["PMS confirmed room / POS accepted order / staff resolved case"]
+  Metrics["Deduplicate: leads, source, delivery, staff SLA, real confirmed outcomes"]
+  Separate["Separate hotel gross bookings from Worthkind subscription revenue"]
+  Gate{"Guest opted in to promotional updates?"}
+  Marketing["Marketing template approved; budget, quality and rate policy"]
+  NoPromo["Do not send promotion; transactional replies subject to policy"]
+  Costs["Message pricing by category/country + AI/STT + infrastructure + BSP markup"]
+  Budget{"Per-property monthly budget or quality threshold exceeded?"}
+  Pause["Pause noncritical outbound and alert hotel operator"]
+  Ship["Approved, consented send; record message ID and delivery"]
+  Source --> WA --> Referral --> Conversation --> Outcome
+  Outcome -->|"No"| Pending --> Metrics
+  Outcome -->|"Yes"| Verified --> Metrics
+  Metrics --> Separate --> Gate
+  Gate -->|"No"| NoPromo
+  Gate -->|"Yes"| Marketing --> Costs --> Budget
+  Budget -->|"Yes"| Pause
+  Budget -->|"No"| Ship

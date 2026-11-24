@@ -1,0 +1,33 @@
+flowchart TD
+  WA["Guest WhatsApp message or structured interactive reply"]
+  Decide{"Deterministic intent + human preference"}
+  Room["Room request: dates, guests, policy, rate and hold"]
+  Fnb["Dining: menu, allergens, collection / delivery"]
+  Help["IT/maintenance/guest support: classify and create ticket"]
+  Events["Events: venue, capacity, date, handoff"]
+  Careers["Careers: approved vacancies; restricted application channel"]
+  Supplier["Supplier: procurement triage; no binding acceptance"]
+  NoInfo["Clarify or assign hotel staff; do not invent data"]
+  Confirm{"Authoritative hotel system / human approval?"}
+  Enquiry["Record labelled enquiry and staff owner only"]
+  Success["Persist provider-referenced verified result"]
+  Outbox["Audit + outbox + guest update subject to WhatsApp policies"]
+  Staff["Reception / department dashboard"]
+  WA --> Decide
+  Decide --> Room
+  Decide --> Fnb
+  Decide --> Help
+  Decide --> Events
+  Decide --> Careers
+  Decide --> Supplier
+  Room --> Confirm
+  Fnb --> Confirm
+  Help --> Staff
+  Events --> Staff
+  Careers --> Staff
+  Supplier --> Staff
+  Confirm -->|"Not integrated / pending"| Enquiry --> Staff
+  Confirm -->|"Provider or authorized staff confirms"| Success --> Outbox
+  Staff -->|"Staff acknowledgement, response or rejection"| Outbox
+  Decide -->|"Unknown or wants human"| NoInfo --> Staff
+  Outbox -->|"Provider-delivered message subject to status callback"| WA

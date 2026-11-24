@@ -1,0 +1,27 @@
+stateDiagram-v2
+  [*] --> OutboxQueued: Hotel reply / event committed with audit
+  OutboxQueued --> PolicyBlocked: Consent, window, template, policy or spend guard denies
+  OutboxQueued --> Sending: Worker leases and validates request
+  Sending --> ProviderAccepted: Meta returns wamid / accepted
+  Sending --> RetryPending: Network 429/5xx or temporary timeout
+  RetryPending --> Sending: Capped backoff with dedupe and idempotency
+  RetryPending --> Unknown: Max attempts or provider outcome uncertain
+  ProviderAccepted --> Sent: Meta status webhook says sent
+  ProviderAccepted --> Delivered: Meta status says delivered (sent may be skipped)
+  Sent --> Delivered: Delivery callback
+  Delivered --> Read: Read callback if user permits
+  ProviderAccepted --> Failed: Failed webhook / rejected message
+  Sent --> Failed: Failure status
+  PolicyBlocked --> HumanRequired: Cannot legally or safely send
+  Failed --> HumanRequired: Contact/transport exception
+  Unknown --> HumanRequired: Reconcile before reattempt
+  Read --> [*]
+  HumanRequired --> [*]
+  note right of ProviderAccepted
+    API acceptance is NOT device delivery.
+    Preserve all raw signed status events for reconciliation.
+  end note
+  note right of PolicyBlocked
+    Outside 24h: only approved template.
+    Separate consent/marketing and cost guards.
+  end note

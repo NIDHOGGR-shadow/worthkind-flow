@@ -1,0 +1,38 @@
+sequenceDiagram
+  autonumber
+  actor Guest
+  participant WA as WhatsApp client
+  participant Meta as Meta Cloud API
+  participant Hook as Worthkind HTTPS webhook
+  participant DB as Tenant-scoped Inbox / DB
+  participant Policy as Routing + authority
+  participant Hotel as Staff/PMS
+  participant Sender as Outbox worker
+  Guest->>WA: "Is a room available Friday?"
+  WA->>Meta: Encrypted WhatsApp delivery (internet)
+  Meta->>Hook: POST signed webhook with phone_number_id and wamid
+  Hook->>Hook: Verify raw-body signature, size and source shape
+  Hook->>DB: Atomically persist event id and tenant scope (idempotent)
+  DB-->>Hook: Committed
+  Hook-->>Meta: HTTP 200 only after durable ingest
+  DB->>Policy: Async process normalized event
+  Policy->>Policy: Human bypass, intent, consent, window, PII check
+  alt No authorized PMS integration
+    Policy->>DB: Create enquiry + staff case + audit + outbox
+    DB->>Hotel: Staff sees new enquiry
+    Hotel->>DB: Claim and respond via authenticated dashboard
+  else Verified PMS exists
+    Policy->>Hotel: Read-only available rooms/quote (authorized)
+    Hotel-->>Policy: Source quote and status
+    Policy->>DB: Persist source-qualified reply and outbox
+  end
+  DB->>Sender: Claim pending outbound event (lease)
+  Sender->>Sender: Verify consent/window/template, tenant budget, current ownership
+  Sender->>Meta: POST Graph API /phone_number_id/messages
+  Meta-->>Sender: Provider message ID / accepted
+  Sender->>DB: Mark accepted, NOT delivered
+  Meta-->>WA: Delivery attempt
+  Meta->>Hook: Signed status webhook sent/delivered/read/failed
+  Hook->>DB: Dedupe status event; correlate provider message ID
+  DB->>Hotel: Update staff view of delivery and exceptions
+  WA-->>Guest: Hotel answer or request status (when delivered)

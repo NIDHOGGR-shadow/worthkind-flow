@@ -1,0 +1,37 @@
+flowchart TD
+  Event["External WhatsApp webhook: arbitrary public HTTPS request"]
+  HMAC{"Valid raw HMAC signature and bounded payload?"}
+  Deny["403 / 400; no business side effect; security alert thresholds"]
+  Tenant{"Authorized WABA + phone_number_id mapped to active hotel?"}
+  Quarantine["Quarantine / safe reject, never leak other hotel's data"]
+  Persist{"Unique provider id + tenant; durable DB commit?"}
+  Retry["5xx where safe; Meta retries; alert and recover from outbox/inbox"]
+  Ack["HTTP 200 after durable commit, including duplicate events"]
+  Process["Async per-conversation ordered processing / bounded concurrency"]
+  Control{"Human/emergency, consent, access and per-hotel budget?"}
+  Human["Manual service path and staff-owned ticket"]
+  Types["Read-only FAQ or authorized action; typed schema, no unrestricted SQL"]
+  Confirm{"Verified PMS/POS/finance/staff outcome?"}
+  Pending["Reply pending/unknown or escalate; do not fabricate confirmation"]
+  Commit["Atomic domain state + audit + outbox"]
+  Sender{"Approved message template/window, valid token and rate budget?"}
+  Failure["Hold message and alert; do not blindly resend unknown business action"]
+  MetaSend["Graph API send → provider id accepted"]
+  Status["Signed delivery-status callback → inbox → reconciliation"]
+  Event --> HMAC
+  HMAC -->|"No"| Deny
+  HMAC -->|"Yes"| Tenant
+  Tenant -->|"No"| Quarantine
+  Tenant -->|"Yes"| Persist
+  Persist -->|"No"| Retry
+  Persist -->|"Yes or known duplicate"| Ack
+  Ack --> Process --> Control
+  Control -->|"Urgent/wants human"| Human
+  Control -->|"Allowed"| Types --> Confirm
+  Confirm -->|"Unknown/no"| Pending --> Human
+  Confirm -->|"Source verified"| Commit
+  Human --> Commit
+  Commit --> Sender
+  Sender -->|"No"| Failure
+  Sender -->|"Yes"| MetaSend --> Status
+  Failure --> Human

@@ -1,0 +1,37 @@
+flowchart TB
+  subgraph Guest["Guest-facing WhatsApp experience"]
+    Entry["Click-to-WhatsApp QR, hotel profile or saved contact"]
+    Welcome["Identify hotel; privacy notice; quick options: Rooms, Dining, Service, Events, Human"]
+    Input["Quick reply, list, photo, voice note, free text or structured Flow"]
+    Progress["Enquiry reference, actual status, human contact and opt-out"]
+    Entry --> Welcome --> Input --> Progress
+  end
+  subgraph FrontDesk["Reception/IT/hotel staff application"]
+    Inbox["Shared inbox by hotel/property and staffed hours"]
+    Claim["Claim one conversation; AI paused on human takeover"]
+    Task["Open/assign ticket, quote/enquiry, notes and timer"]
+    Reply["Approved staff reply; provider delivery state shown"]
+    Inbox --> Claim --> Task --> Reply
+  end
+  subgraph HotelAdmin["Hotel owner / administrator"]
+    Setup["Configure business number, roles, property, approved policies"]
+    Audit["Review handoff quality, unresolved cases, delivery and spend"]
+    Setup --> Audit
+  end
+  subgraph WKAdmin["Worthkind operations / partnerships"]
+    Provision["Verify onboarding consent, WABA links, package and billing"]
+    Support["Monitor tenant health, incident escalations, offboarding"]
+    Provision --> Support
+  end
+  subgraph Engineers["Worthkind engineering / security"]
+    Test["Sandbox replay + signed fixture tests"]
+    Deploy["Versioned templates, channel adapters, feature flags and code review"]
+    Telemetry["Redacted webhook traces, retry queue, cost budgets, rollback"]
+    Test --> Deploy --> Telemetry
+  end
+  Input --> Inbox
+  Reply --> Progress
+  Setup --> Inbox
+  Provision --> Setup
+  Telemetry --> Support
+  Audit --> Support

@@ -1,0 +1,22 @@
+stateDiagram-v2
+  [*] --> Unassigned: Guest message processed
+  Unassigned --> AutoHandling: Validated FAQ/low-risk path
+  Unassigned --> QueuedHuman: Explicit human or safety trigger
+  AutoHandling --> QueuedHuman: Low confidence / denied action / repeated confusion
+  AutoHandling --> AutoHandling: Evidence-backed answer
+  QueuedHuman --> AssignedHuman: Authorized receptionist claims
+  QueuedHuman --> Escalated: Unacknowledged by approved SLA
+  Escalated --> AssignedHuman: Supervisor assigns staff
+  AssignedHuman --> HumanWorking: Staff replies and/or owns task
+  HumanWorking --> Resolved: Guest request completed with evidence
+  HumanWorking --> Escalated: Shift ends / needs specialist
+  Resolved --> AutoHandling: Staff explicitly releases and guest re-engages
+  Resolved --> [*]: Conversation archived per retention
+  note right of QueuedHuman
+    Agent must NOT respond as human.
+    Show actual queue status, hours and alternative contact.
+  end note
+  note right of HumanWorking
+    AI generation paused for conversation.
+    Automation may only send approved administrative notices.
+  end note

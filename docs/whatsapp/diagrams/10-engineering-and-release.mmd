@@ -1,0 +1,23 @@
+flowchart TD
+  Discover["Founder + hotel operations: actual process, volumes, current PMS/BSP"]
+  Contracts["Tech lead: schema, authority, tenant threat model, accepted statuses"]
+  Reuse["Audit Zuvamo adapters: Meta / Twilio, voice notes, owner auth, tests"]
+  Sandbox["Local signed webhook fixtures / sandbox number"]
+  Adapter["Pure WhatsApp adapter: normalize inputs, statuses; no business side effects"]
+  Inbox["Backend: HMAC, tenant map, inbox dedupe, ordered worker"]
+  Domain["Backend: approved FAQ, enquiry, IT tickets and staff handoff"]
+  Outbox["Backend: outbound policy, sender, templates, provider acknowledgments"]
+  Frontend["UX: guest scripts, staff inbox, hotel settings and exception queue"]
+  Sec["QA: cross-hotel, prompt injection, replay, expired token, 24h, errors"]
+  Model["AI/ML: rule baseline; knowledge/prompt/model eval gate"]
+  Gate{"P0 release contract all passed?"}
+  Staging["One hotel-controlled sender and internal staging pilot"]
+  Pilot{"Hotel manager acceptance and observed improvement?"}
+  Hold["No public live channel; keep direct/human service and fix blockers"]
+  Observe["Monitor outcomes, spend and incident recovery"]
+  Discover --> Contracts --> Reuse --> Sandbox --> Adapter --> Inbox --> Domain --> Outbox --> Frontend --> Sec --> Model --> Gate
+  Gate -->|"No"| Hold
+  Gate -->|"Yes"| Staging --> Pilot
+  Pilot -->|"No"| Hold
+  Pilot -->|"Yes"| Observe
+  Observe -.->|"Feedback with consent and labels"| Discover

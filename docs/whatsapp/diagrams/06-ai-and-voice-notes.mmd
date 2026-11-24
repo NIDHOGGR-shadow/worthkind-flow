@@ -1,0 +1,37 @@
+flowchart TD
+  In["Signed, deduped, property-scoped WhatsApp message"]
+  Type{"Text, buttons, media, voice note, or live call?"}
+  Text["Text / list / button payload validated"]
+  Media["Authorized media download; size and content-type check"]
+  STT["Speech-to-text adapter for voice notes"]
+  Live["Separate WhatsApp Calling API/SIP/WebRTC integration; not same as voice note"]
+  Rule{"Emergency/STOP/human trigger or staff ownership?"}
+  Human["Human queue; immediate no-agent bypass"]
+  Fast{"Fixed answer from approved hotel FAQ or structured rule?"}
+  Reply["Evidence-tagged safe reply"]
+  Retrieve["Enforce tenant, property, public/private read scope; retrieve approved KB version"]
+  AI["Existing chat agent as optional constrained language/orchestration module"]
+  Evidence{"Evidence sufficient and tool authorized?"}
+  Action["Explicit guest confirmation where needed + typed backend tool"]
+  Result{"Source system confirms?"}
+  Unknown["Clarify, abstain or human case"]
+  Evaluate["Monitor hallucination, unsafe actions, latency, cost, handoff and language"]
+  In --> Type
+  Type --> Text --> Rule
+  Type --> Media --> Rule
+  Type -->|"voice note"| STT --> Rule
+  Type -->|"live WhatsApp call"| Live --> Rule
+  STT -->|"untranscribable"| Human
+  Rule -->|"Yes"| Human
+  Rule -->|"No"| Fast
+  Fast -->|"Yes"| Reply
+  Fast -->|"No"| Retrieve --> AI --> Evidence
+  Evidence -->|"No"| Unknown --> Human
+  Evidence -->|"Yes: read"| Reply
+  Evidence -->|"Yes: proposed action"| Action --> Result
+  Result -->|"No / unknown"| Human
+  Result -->|"Yes"| Reply
+  Reply --> Evaluate
+  Human --> Evaluate
+  Evaluate -.->|"consented redacted examples"| Gate["Offline fixed evaluation: prompts, models, retrieval and tools"]
+  Gate -.->|"pass version gate"| AI

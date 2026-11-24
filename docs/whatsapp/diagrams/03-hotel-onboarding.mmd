@@ -1,0 +1,28 @@
+flowchart TD
+  Lead["Hotel owner signs Worthkind contract and approves data use"]
+  Verify{"Hotel identity and phone-number control verified?"}
+  Setup["Configure property, hours, support SLAs, privacy, policies, departments"]
+  Signup{"Account mode supported?"}
+  New["Hotel Meta Business / WABA setup or approved Embedded Signup"]
+  Coexist["Assess Business App + API coexistence and constraints (where supported)"]
+  Migrate["Assess existing BSP/Twilio number migration, routing and downtime"]
+  Perm["Grant messaging/management permissions with least privileges"]
+  Secret["Store tokens + app secrets with vault and per-hotel isolation"]
+  Map["Map WABA ID, phone_number_id, hotel and permitted channels"]
+  Webhook["Subscribe app to WABA messages; setup challenge and verify signed live callbacks"]
+  Templates["Create purpose-specific utility/marketing/auth templates and await approval"]
+  Consent["Document guest contact consent, categories, opt-out, retention and support"]
+  Tests["Sandbox: inbound, outbound, status, template, 24h, takeover, outage and cost tests"]
+  Authorize{"Hotel owner approves controlled launch?"}
+  Go["Enable channel per-property with budgets, monitoring and rollback"]
+  Stop["Keep disabled; show precise blocker and manual hotel contact"]
+  Lead --> Verify
+  Verify -->|"No"| Stop
+  Verify -->|"Yes"| Setup --> Signup
+  Signup -->|"New/authorized account"| New --> Perm
+  Signup -->|"Business App coexistence"| Coexist --> Perm
+  Signup -->|"Existing BSP"| Migrate --> Perm
+  Perm --> Secret --> Map --> Webhook --> Templates --> Consent --> Tests --> Authorize
+  Authorize -->|"No"| Stop
+  Authorize -->|"Yes"| Go
+  Go -->|"Revocation, token expiry or policy violation"| Stop

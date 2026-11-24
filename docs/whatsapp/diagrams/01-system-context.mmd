@@ -1,0 +1,47 @@
+flowchart TB
+  Guest["Hotel guest: WhatsApp on Android / iOS / desktop"]
+  Network["Wi-Fi or cellular internet (mobile network transports IP only)"]
+  Meta["Meta WhatsApp Business Platform / Cloud API"]
+  HotelWABA["Hotel-owned or authorized WABA + registered business phone number ID"]
+  MetaWebhook["HTTPS signed webhook for messages and status changes"]
+  Ingress["Worthkind provider ingress: verify HMAC over raw bytes, schema limits, idempotency"]
+  Inbox["Transactional webhook inbox; 1 message/event stored once"]
+  Tenant["Resolve WABA + phone_number_id to property; deny unknown/disabled"]
+  Identity["Scoped conversation + guest permissions; do not assume phone number proves booking ownership"]
+  Policy["Deterministic emergency/human/STOP rules; consent and 24-hour eligibility"]
+  Router{"Direct answer, human or evaluated AI?"}
+  Read["Read-only hotel policy/FAQ authorization and versioned retrieval"]
+  Chat["Existing text agent adapter (optional; disabled on unsafe inputs)"]
+  Voice["Voice-note adapter → secure media fetch → speech-to-text (optional)"]
+  Human["Staff-owned conversation / receptionist helpdesk"]
+  Domain["Typed hotel operations: enquiry, IT/service ticket, dining, events, careers"]
+  PMS["Authorized PMS / booking authority (not connected in P0)"]
+  POS["Authorized POS / kitchen authority (future)"]
+  PSP["Payment service provider / finance verification (future)"]
+  Durable["Scoped PostgreSQL state + audit + transactional outbox"]
+  Worker["Outbound sender: per-tenant credentials, approved templates, rate limits, retries"]
+  Status["Provider delivery/read/failed statuses; correlate message ID"]
+  Monitor["Observability: traces, delivery, handoffs, privacy, per-tenant spend"]
+  StaffUI["Staff console: case, ticket, claim, reply, takeover"]
+  Guest --> Network --> Meta
+  HotelWABA --> Meta
+  Meta -->|"inbound event"| MetaWebhook --> Ingress --> Inbox --> Tenant --> Identity --> Policy --> Router
+  Policy -->|"Emergency or wants human"| Human
+  Router -->|"Hotel FAQ"| Read
+  Router -->|"Optional AI"| Chat --> Read
+  Router -->|"Audio media"| Voice --> Read
+  Read -->|"No evidence"| Human
+  Read -->|"Verified read response"| Durable
+  Router -->|"Business action"| Domain
+  Domain --> PMS
+  Domain --> POS
+  Domain --> PSP
+  Domain --> Durable
+  Human --> StaffUI --> Durable
+  Durable --> Worker -->|"POST /{phone-number-id}/messages"| Meta
+  Meta -->|"sent, delivered, read, failed callbacks"| Status --> Inbox
+  Inbox --> Monitor
+  Durable --> Monitor
+  Worker --> Monitor
+  Status --> Monitor
+  Status -->|"Customer-visible delivery state"| StaffUI
