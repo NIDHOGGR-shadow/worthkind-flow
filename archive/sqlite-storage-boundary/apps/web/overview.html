@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Worthkind Flow — Local hotel operations overview</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#overview-content">Skip to hotel operations overview</a>
+  <header class="shell topbar">
+    <a class="brand" href="/" aria-label="Worthkind Flow guest demo"><span class="mark">W</span> WORTHKIND <strong>FLOW</strong></a>
+    <nav class="staff-page-nav" aria-label="Local workspace">
+      <a class="staff-link" href="/staff">Guest inbox</a>
+      <a class="staff-link" href="/staff/tickets">Department tickets</a>
+      <a class="staff-link" href="/staff/knowledge">Hotel knowledge</a>
+      <a class="staff-link" href="/">Guest site</a>
+    </nav>
+  </header>
+  <main class="shell overview-page" id="overview-content">
+    <div class="overview-heading">
+      <div>
+        <div class="eyebrow">LOCAL HOTEL OPERATIONS · NO LIVE PROVIDERS</div>
+        <h1>Know what needs attention.</h1>
+        <p>One property at a time. Every number below comes from its local SQLite records rather than illustrative dashboard data.</p>
+      </div>
+      <span class="stage-pill">Engineering development only</span>
+    </div>
+    <section class="panel overview-auth" aria-labelledby="overview-access-title">
+      <div class="section-label">01 · PROPERTY CONTEXT</div>
+      <h2 id="overview-access-title">Load your local hotel workspace</h2>
+      <p>This reference uses temporary development keys—not individual hotel staff identities or production permission controls.</p>
+      <div class="overview-auth-grid">
+        <div>
+          <label for="overview-property">Demo property</label>
+          <select id="overview-property">
+            <option value="demo-hotel">Demo Hotel A</option>
+            <option value="demo-hotel-two">Demo Hotel B</option>
+          </select>
+        </div>
+        <div>
+          <label for="overview-key">Development staff key</label>
+          <div class="key-field">
+            <input id="overview-key" type="password" autocomplete="off" spellcheck="false" placeholder="Local demo key">
+            <button class="button secondary compact" id="overview-key-toggle" type="button" aria-label="Show development staff key" aria-pressed="false">Show</button>
+          </div>
+        </div>
+        <button class="button primary" id="overview-load" type="button">Refresh real local counts</button>
+      </div>
+      <div class="result" id="overview-message" role="status" aria-live="polite">Enter the matching local demo key. Nothing has been loaded.</div>
+    </section>
+
+    <section id="overview-results" aria-label="Property overview" hidden>
+      <div class="overview-section-title">
+        <div>
+          <div class="section-label">02 · HOTEL HEALTH</div>
+          <h2 id="overview-hotel-name">No property selected</h2>
+          <p class="overview-source" id="overview-source">Source not loaded</p>
+        </div>
+      </div>
+      <div class="overview-kpi-grid" aria-label="Actual local case and ticket totals">
+        <div class="workspace-stat"><span>Guest enquiries</span><strong id="metric-case-total">—</strong><small>Local cases recorded</small></div>
+        <div class="workspace-stat"><span>Awaiting staff claim</span><strong id="metric-case-queued">—</strong><small>Queued enquiries</small></div>
+        <div class="workspace-stat"><span>Claimed enquiries</span><strong id="metric-case-claimed">—</strong><small>Staff work pending</small></div>
+        <div class="workspace-stat"><span>Replied enquiries</span><strong id="metric-case-responded">—</strong><small>Locally recorded responses</small></div>
+        <div class="workspace-stat"><span>Department tickets</span><strong id="metric-ticket-total">—</strong><small>Local work requests</small></div>
+        <div class="workspace-stat"><span>Unresolved tickets</span><strong id="metric-ticket-unresolved">—</strong><small>Not marked resolved</small></div>
+        <div class="workspace-stat"><span>Overdue tickets</span><strong id="metric-ticket-overdue">—</strong><small>Based on example internal due dates</small></div>
+        <div class="workspace-stat"><span>Pending local events</span><strong id="metric-outbox-pending">—</strong><small>Not sent notifications</small></div>
+      </div>
+
+      <div class="overview-content-grid">
+        <section class="panel" aria-labelledby="recent-cases-heading">
+          <div class="section-label">03 · RECEPTION</div>
+          <div class="overview-panel-heading"><h2 id="recent-cases-heading">Recent guest enquiries</h2><a class="staff-link" href="/staff">Open inbox</a></div>
+          <p>Only category and state are shown here. Sensitive names, contacts and details remain outside this overview.</p>
+          <div id="overview-cases" class="overview-activity-list" role="list"><p>Load the property to view cases.</p></div>
+        </section>
+        <section class="panel" aria-labelledby="recent-tickets-heading">
+          <div class="section-label">04 · DEPARTMENT WORK</div>
+          <div class="overview-panel-heading"><h2 id="recent-tickets-heading">Recent service tickets</h2><a class="staff-link" href="/staff/tickets">Open service desk</a></div>
+          <p>Statuses and priorities come from the local ticket engine. The example due dates are not contractual hotel SLAs.</p>
+          <div id="overview-tickets" class="overview-activity-list" role="list"><p>Load the property to view tickets.</p></div>
+        </section>
+      </div>
+
+      <section class="panel overview-unavailable" aria-labelledby="unavailable-heading">
+        <div class="section-label">05 · INTEGRATION STATUS</div>
+        <h2 id="unavailable-heading">No invented hotel metrics</h2>
+        <p>Room occupancy, arrivals, confirmed bookings, hotel revenue, voice conversations and Worthkind subscription usage need real source integrations. They are intentionally unavailable here.</p>
+        <div class="unavailable-grid">
+          <div><strong>Room occupancy</strong><span>Not connected</span></div>
+          <div><strong>Confirmed bookings</strong><span>Not connected</span></div>
+          <div><strong>Hotel payments</strong><span>Not connected</span></div>
+          <div><strong>AI/voice usage</strong><span>Not connected</span></div>
+        </div>
+        <p class="notice">This page uses synthetic local data. No notifications were delivered and no external hotel system or payment provider was contacted.</p>
+      </section>
+    </section>
+  </main>
+  <footer class="shell footer">Worthkind Flow · Local SQLite engineering reference · No live hotel data or production authentication</footer>
+  <script src="/static/overview.js" defer></script>
+</body>
+</html>
