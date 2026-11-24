@@ -1,0 +1,29 @@
+flowchart TD
+  Msg["Website/chat/voice/messaging normalized request"]
+  Scope["Resolve hotel, permitted guest identity and data purpose"]
+  Hard{"Human request, emergency or existing staff takeover?"}
+  Handoff["Manual staff case, AI suspended for this conversation"]
+  Rule["Rules engine and safe direct answer"]
+  Source["Approved property knowledge retrieval with version/scope"]
+  Answer{"Sufficient grounded evidence?"}
+  Agent["Optional existing chat/voice agent: constrained prompt and schema"]
+  Tool{"Domain action or text only?"}
+  Auth["Backend checks role, consent, confirmation, budget and provider permissions"]
+  Verify["Verify authoritative business result"]
+  Abstain["Abstain, clarify or handoff"]
+  Reply["Source-qualified response to customer"]
+  Eval["Privacy-safe evaluations, shadow test, release gate, rollback"]
+  Msg --> Scope --> Hard
+  Hard -->|"Yes"| Handoff
+  Hard -->|"No"| Rule
+  Rule -->|"Known safe FAQ"| Reply
+  Rule -->|"Requires retrieval"| Source --> Answer
+  Answer -->|"No"| Abstain --> Handoff
+  Answer -->|"Yes"| Agent --> Tool
+  Tool -->|"Text"| Reply
+  Tool -->|"Material action"| Auth --> Verify
+  Verify -->|"No or unknown"| Handoff
+  Verify -->|"Yes"| Reply
+  Reply --> Eval
+  Handoff --> Eval
+  Eval -.->|"Approved version only"| Agent

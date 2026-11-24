@@ -1,0 +1,34 @@
+flowchart LR
+  Tenant["Hotel organization/property (tenant)"]
+  Guest["Guest/contact and consent"]
+  Staff["Staff roles and shifts"]
+  Catalog["Room inventory and public hotel policies"]
+  Cases["Reception cases and department tickets"]
+  Booking["Quote, hold, reservation and cancellation"]
+  Money["Payment intents, verification and reconciliation"]
+  AI["Knowledge versions and model/prompt evaluations"]
+  Marketing["Hotel leads, source consent, ad attribution"]
+  Audit["Immutable business audit and transactional outbox"]
+  Reports["Materialized hotel / platform reports"]
+  Provider["PMS / PSP / POS authoritative sources"]
+  Tenant --> Guest
+  Tenant --> Staff
+  Tenant --> Catalog
+  Tenant --> Cases
+  Tenant --> AI
+  Tenant --> Marketing
+  Guest --> Cases
+  Staff --> Cases
+  Catalog --> Booking
+  Booking --> Money
+  Provider --> Booking
+  Provider --> Money
+  Cases --> Audit
+  Booking --> Audit
+  Money --> Audit
+  Staff --> Audit
+  Marketing --> Audit
+  Audit --> Reports
+  Booking --> Reports
+  Money --> Reports
+  Cases --> Reports

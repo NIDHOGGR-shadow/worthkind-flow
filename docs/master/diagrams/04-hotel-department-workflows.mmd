@@ -1,0 +1,37 @@
+flowchart TB
+  Request["Reception or verified guest/staff request"]
+  Classify{"Approved department rule"}
+  IT["IT: device, network or technical issue"]
+  Maint["Maintenance: room equipment, repairs"]
+  House["Housekeeping: cleaning / linen"]
+  Kitchen["Dining: menu, order and kitchen acceptance"]
+  Events["Events: sales enquiry and venue approval"]
+  HR["Careers: HR-only application"]
+  Supply["Suppliers: procurement review"]
+  Queue["Department-scoped ticket or lead + assignee"]
+  Accept{"Staff acknowledges within approved coverage?"}
+  Escalate["Supervisor / alternate on-call escalation"]
+  Work["Authorized staff records progress and evidence"]
+  Source{"Business authority verifies completion?"}
+  Pending["Reopen, exception, or manager review"]
+  Done["Resolved with history and guest update"]
+  Request --> Classify
+  Classify --> IT
+  Classify --> Maint
+  Classify --> House
+  Classify --> Kitchen
+  Classify --> Events
+  Classify --> HR
+  Classify --> Supply
+  IT --> Queue
+  Maint --> Queue
+  House --> Queue
+  Kitchen --> Queue
+  Events --> Queue
+  HR --> Queue
+  Supply --> Queue
+  Queue --> Accept
+  Accept -->|"No"| Escalate --> Queue
+  Accept -->|"Yes"| Work --> Source
+  Source -->|"No"| Pending --> Work
+  Source -->|"Yes"| Done

@@ -1,0 +1,37 @@
+sequenceDiagram
+  autonumber
+  actor Guest
+  participant Website as Hotel website / approved channel
+  participant Core as Worthkind Flow booking coordinator
+  participant PMS as Authorized hotel PMS
+  participant PSP as Authorized payment provider
+  participant DB as Domain state / audit / outbox
+  participant Staff as Hotel reception / finance
+  Guest->>Website: Dates, guests and room preference
+  Website->>Core: scoped availability request
+  alt No authorized PMS connected
+    Core->>DB: Record enquiry, not booking
+    Core-->>Guest: Enquiry queued for hotel staff
+    Staff->>DB: Claim and respond
+  else PMS connected
+    Core->>PMS: Availability and tax-inclusive quote
+    PMS-->>Core: Provider source quote, policy, expiry
+    Core-->>Guest: Show terms, total and cancellation policy
+    Guest->>Core: Explicitly approve checkout
+    Core->>PMS: Hold inventory if supported
+    Core->>DB: Idempotent payment intent and audit
+    Core->>PSP: Secure hosted checkout
+    PSP-->>Guest: Payment UX
+    PSP->>Core: Signed webhook (may duplicate/out-of-order)
+    Core->>PSP: Server-to-server verify amount/currency/reference
+    alt Payment verified and PMS confirms
+      Core->>PMS: Idempotent final reservation confirmation
+      PMS-->>Core: Authoritative reservation reference
+      Core->>DB: Commit confirmed booking and receipt outbox
+      Core-->>Guest: Confirmed reference
+    else Unknown, late or failed outcome
+      Core->>DB: Exception and safe reconciliation workflow
+      Staff->>DB: Finance/reception review, refund or recovery policy
+      Core-->>Guest: Pending resolution, no false confirmation
+    end
+  end

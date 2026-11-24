@@ -1,0 +1,37 @@
+flowchart TB
+  subgraph Guest["Guest application"]
+    Browse["Hotel website, rooms, policies"]
+    Enquire["Availability/enquiry + direct human option"]
+    Booking["Verified checkout and reservation status when available"]
+    GuestStatus["Request and ticket status; cancellations"]
+    Browse --> Enquire --> GuestStatus
+    Enquire --> Booking
+  end
+  subgraph Staff["Hotel staff console"]
+    StaffInbox["Reception inbox and ownership"]
+    StaffTickets["IT/housekeeping/maintenance service desk"]
+    StaffDuty["Shift schedule, handoff and approvals"]
+    StaffInbox --> StaffTickets --> StaffDuty
+  end
+  subgraph Owner["Hotel management console"]
+    Setup["Property setup, roles, content and services"]
+    Rooms["Room/rate configuration with authorized PMS"]
+    Dash["Performance, outstanding work and verified finances"]
+    Setup --> Rooms --> Dash
+  end
+  subgraph Worthkind["Worthkind control plane"]
+    Partner["Prospects, consent, onboarding and contracts"]
+    Billing["Tenant subscriptions and usage costs"]
+    Support["Incidents, deployments, privacy and support"]
+    Partner --> Billing --> Support
+  end
+  subgraph Engineering["Engineering and QA console"]
+    Trace["Redacted traces, provider events, test fixtures"]
+    Release["CI/release gates, model and schema versions"]
+    Trace --> Release
+  end
+  Enquire --> StaffInbox
+  StaffTickets --> Dash
+  GuestStatus --> Dash
+  Setup --> Partner
+  Support --> Trace

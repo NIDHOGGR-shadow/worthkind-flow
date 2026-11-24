@@ -1,0 +1,19 @@
+flowchart TB
+  Source["Engineering change / hotel configuration / provider contract"]
+  Review["Code review, threat modeling, test fixtures and accessibility"]
+  CI["Unit, integration, tenant isolation, E2E, load and negative tests"]
+  Gate{"Release and owner signoff?"}
+  Block["Block launch; retain manual/human route"]
+  Deploy["Staging, feature flags and controlled canary"]
+  Observe["Per-property errors, spend, business outcomes and alerts"]
+  Incident{"Failure, breach, provider outage or SLO miss?"}
+  Disable["Kill switch, disable unsafe actions and preserve enquiry path"]
+  Restore["Replay inbox/outbox, restore backups, reconcile payments/tickets"]
+  Communicate["Notify affected hotel/owners under policy and law"]
+  Root["Document root cause, remediation and regression tests"]
+  Continue["Continue monitored operation"]
+  Source --> Review --> CI --> Gate
+  Gate -->|"No"| Block
+  Gate -->|"Yes"| Deploy --> Observe --> Incident
+  Incident -->|"No"| Continue --> Observe
+  Incident -->|"Yes"| Disable --> Restore --> Communicate --> Root --> Review

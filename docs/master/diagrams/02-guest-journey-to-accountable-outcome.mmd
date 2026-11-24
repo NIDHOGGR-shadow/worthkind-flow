@@ -1,0 +1,34 @@
+flowchart TD
+  Start["Customer finds hotel: organic, referral, ads or direct"]
+  Choose{"Preferred channel / request"}
+  Direct["Direct enquiry / hotel site: no AI"]
+  AI["Optional chat or voice agent"]
+  Human["Request a person"]
+  Ten["Resolve verified property, consent and guest scope"]
+  Rules{"Rules: urgency, purpose, user preference"}
+  KB["Tenant-approved FAQ and read-only tools"]
+  Need{"Actual hotel action required?"}
+  Cases["Create idempotent case with audit and pending notification"]
+  Staff["Reception claims case during staffed hours"]
+  Dept["Assignable department ticket / domain workflow"]
+  Verify{"Staff/provider verifies real outcome?"}
+  Unknown["Pending or escalated, never 'completed' by guess"]
+  Done["Verified reply, case resolution and status"]
+  Metrics["Hotel metrics: acknowledgement and resolution"]
+  Start --> Choose
+  Choose --> Direct --> Ten
+  Choose --> AI --> Ten
+  Choose --> Human --> Ten
+  Ten --> Rules
+  Rules -->|"Human/urgent"| Cases
+  Rules -->|"Known read request"| KB
+  Rules -->|"Business request"| Need
+  KB --> Need
+  Need -->|"No"| Done
+  Need -->|"Yes"| Cases
+  Cases --> Staff
+  Staff --> Dept
+  Dept --> Verify
+  Verify -->|"No/unknown"| Unknown --> Staff
+  Verify -->|"Yes"| Done
+  Done --> Metrics

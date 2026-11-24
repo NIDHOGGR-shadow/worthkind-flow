@@ -1,0 +1,73 @@
+flowchart TB
+  subgraph A["Actors and client surfaces"]
+    Guest["Guest: website, booking, direct help"]
+    Staff["Reception, IT, kitchen, maintenance, HR"]
+    Manager["Hotel owner / manager"]
+    WK["Worthkind operations / engineers"]
+  end
+  subgraph B["Entry and trust boundary"]
+    Web["Hotel website + direct forms"]
+    Channels["Chat/voice/messaging adapters"]
+    StaffUI["Staff console"]
+    OwnerUI["Hotel administration"]
+    AdminUI["Worthkind control plane"]
+    Auth["Property resolution, consent, identity, RBAC, authorization"]
+  end
+  subgraph C["Worthkind Flow modular operations backend"]
+    Core["Workflow/case orchestrator + domain policy"]
+    GuestCRM["Guest and enquiry records"]
+    Inventory["Hotel content, room inventory adapters"]
+    Booking["Reservation/quote/hold/booking coordinator"]
+    Finance["Payment reconciliation and finance exceptions"]
+    Dine["Dining, kitchen and room service"]
+    Tickets["IT, housekeeping and maintenance tickets"]
+    People["Staff, schedules and approvals"]
+    Other["Events, careers and vendors"]
+    Knowledge["Approved knowledge + optional chat/voice AI"]
+    Marketing["Lead, attribution and CRM"]
+    Reports["Hotel reporting and platform usage"]
+  end
+  subgraph D["Persistence, integrations and platform"]
+    Pg["Tenant-scoped PostgreSQL + business audit + inbox/outbox"]
+    Work["Workers, messaging retries and escalation"]
+    Providers["Authorized PMS, payment, POS, marketing and identity providers"]
+    Platform["Monitoring, secrets, backups, billing and deployment"]
+  end
+  Guest --> Web
+  Guest --> Channels
+  Staff --> StaffUI
+  Manager --> OwnerUI
+  WK --> AdminUI
+  Web --> Auth
+  Channels --> Auth
+  StaffUI --> Auth
+  OwnerUI --> Auth
+  AdminUI --> Auth
+  Auth --> Core
+  Core --> GuestCRM
+  Core --> Inventory
+  Core --> Booking
+  Core --> Finance
+  Core --> Dine
+  Core --> Tickets
+  Core --> People
+  Core --> Other
+  Core --> Knowledge
+  Core --> Marketing
+  Core --> Reports
+  GuestCRM --> Pg
+  Booking --> Pg
+  Finance --> Pg
+  Tickets --> Pg
+  People --> Pg
+  Dine --> Pg
+  Other --> Pg
+  Knowledge --> Pg
+  Marketing --> Pg
+  Reports --> Pg
+  Pg --> Work
+  Work --> Providers
+  Providers --> Pg
+  Platform --- Pg
+  Platform --- Work
+  Platform --- Auth
