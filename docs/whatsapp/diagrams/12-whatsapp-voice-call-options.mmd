@@ -1,0 +1,23 @@
+flowchart TD
+  Entry["Hotel customer chooses WhatsApp voice note or WhatsApp live call"]
+  Type{"Media message vs live call?"}
+  VoiceNote["WhatsApp audio media ID in signed message webhook"]
+  Download["Authorized fetch with current media permissions; content, size and retention limits"]
+  Transcribe["Existing STT / Whisper-compatible provider; bounded transcript confidence"]
+  Normal["Same hotel-scoped text policy, human/FAQ/agent flow"]
+  Call["WhatsApp Business Calling API provider capability and region check"]
+  Consent["Business-initiated call requires explicit user permission where applicable"]
+  Connect["SIP / WebRTC / provider's voice transport and real-time stream"]
+  Agent["Existing real-time voice agent with approved hotel prompts"]
+  Handoff["Human receptionist and safe transfer; log consent and incident"]
+  Unknown["Unsupported, offline, permission absent or audio error: offer text/human route"]
+  Entry --> Type
+  Type -->|"Voice note"| VoiceNote --> Download --> Transcribe
+  Transcribe -->|"Success"| Normal
+  Transcribe -->|"Failure"| Unknown
+  Type -->|"Live call"| Call --> Consent
+  Consent -->|"Approved"| Connect --> Agent
+  Consent -->|"Not approved"| Unknown
+  Agent -->|"Human needed"| Handoff
+  Normal -->|"Human needed"| Handoff
+  Unknown --> Handoff

@@ -1,0 +1,18 @@
+flowchart TD
+  Menu["Customer taps interactive button: Request a room"]
+  Check["Eligibility: supported client, approved hotel and template/session"]
+  Flow["Optional Meta WhatsApp Flows in-chat form"]
+  Fields["Structured dates, guest count, enquiry contact and consent"]
+  Data{"Encrypted data exchange integration approved and deployed?"}
+  Dynamic["Server endpoint validates flow token, decrypts payload securely, tenant scopes"]
+  Static["Use static screens or ordinary chat, no fake live availability"]
+  Verify["Validate capacity/availability ONLY against hotel PMS when authorized"]
+  Fallback["If no PMS: create enquiry and staff case, not booking"]
+  Submit["Commit request id, audit and outbound status"]
+  Return["WhatsApp flow completion receipt and human escalation option"]
+  Menu --> Check --> Flow --> Fields --> Data
+  Data -->|"Yes"| Dynamic --> Verify
+  Data -->|"No"| Static --> Fallback
+  Verify -->|"Unavailable/unknown"| Fallback --> Submit
+  Verify -->|"Source verified"| Submit --> Return
+  Submit --> Return
