@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Worthkind Flow — Reception workspace (development)</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#cases">Skip to request queue</a>
+  <header class="shell topbar">
+    <a class="brand" href="/" aria-label="Worthkind Flow guest demo"><span class="mark">W</span> WORTHKIND <strong>FLOW</strong></a>
+    <span class="status">LOCAL DEVELOPMENT · NO REAL HOTEL STAFF</span>
+    <nav class="staff-page-nav" aria-label="Workspace"><a class="staff-link" href="/staff/knowledge">Hotel knowledge</a><a class="staff-link" href="/staff/operations">Hotel operations</a><a class="staff-link" href="/staff/tickets">Department tickets</a><a class="staff-link" href="/">Guest website</a></nav>
+  </header>
+  <main class="shell staff-workspace">
+    <section class="workspace-heading" aria-labelledby="workspace-title">
+      <div>
+        <span class="eyebrow">STAFF SERVICE DESK / DEVELOPMENT</span>
+        <h1 id="workspace-title">Reception, with clarity.</h1>
+        <p>Review property enquiries, claim responsibility and respond directly. This workspace uses synthetic properties and does not send guest notifications.</p>
+      </div>
+      <span class="stage-pill">Not production connected</span>
+    </section>
+    <div class="workspace-layout">
+      <aside class="panel workspace-controls" aria-labelledby="access-title">
+        <div class="section-label">01 · PROPERTY ACCESS</div>
+        <h2 id="access-title">Development access</h2>
+        <p>Use the property-scoped test key configured in your local API environment. This is <strong>not</strong> individual staff authentication.</p>
+        <label for="p">Demo property</label>
+        <select id="p">
+          <option value="demo-hotel">Demo Hotel A</option>
+          <option value="demo-hotel-two">Demo Hotel B</option>
+        </select>
+        <label for="key">Development staff key</label>
+        <div class="key-field">
+          <input id="key" type="password" autocomplete="off" spellcheck="false" placeholder="Enter local demo key">
+          <button class="button secondary compact" type="button" id="toggle-key" aria-label="Show development staff key" aria-pressed="false">Show</button>
+        </div>
+        <button class="button primary block-button" id="load" type="button">Load property cases</button>
+        <p class="workspace-tip">The key is never saved by this page. Changing it or the hotel clears the visible case list.</p>
+        <div class="notice">No room reservation, payment, email, WhatsApp or employee notification is created by these actions.</div>
+      </aside>
+      <section class="workspace-main" aria-labelledby="queue-title">
+        <div class="section-label">02 · HUMAN SERVICE</div>
+        <h2 id="queue-title">Guest request queue</h2>
+        <p class="workspace-subtitle">Counts come only from the selected property's development API—not from the static owner dashboard preview.</p>
+        <div class="workspace-stats" aria-label="Loaded case counts">
+          <div class="workspace-stat"><span>All cases</span><strong id="total-cases">—</strong></div>
+          <div class="workspace-stat"><span>Queued</span><strong id="queued-cases">—</strong></div>
+          <div class="workspace-stat"><span>Claimed</span><strong id="claimed-cases">—</strong></div>
+          <div class="workspace-stat"><span>Responded</span><strong id="responded-cases">—</strong></div>
+        </div>
+        <div class="panel queue-panel">
+          <div class="queue-toolbar">
+            <div>
+              <label for="filter-status">Filter by status</label>
+              <select id="filter-status">
+                <option value="all">All statuses</option>
+                <option value="queued">Queued</option>
+                <option value="claimed">Claimed</option>
+                <option value="responded">Responded</option>
+              </select>
+            </div>
+            <div>
+              <label for="search-cases">Search loaded cases</label>
+              <input type="search" id="search-cases" placeholder="Name, topic or details" autocomplete="off">
+            </div>
+          </div>
+          <div class="queue-meta"><span id="visible-count">No cases loaded</span><span>Source: local development API</span></div>
+          <p class="result workspace-message" id="message" role="status" aria-live="polite">Select a demo property, enter its staff key and load the queue.</p>
+          <div id="cases" class="case-list" role="list" aria-label="Property guest requests">
+            <div class="case-empty">The queue will appear here after successful authentication.</div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+  <footer class="shell footer">Worthkind Flow · Engineering reference only. No real staff identities, messaging provider, PMS or payment processing connected.</footer>
+  <script src="/static/staff.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Worthkind Flow — Staff and IT tickets</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+<header class="shell topbar"><a href="/" class="brand"><span class="mark">W</span> WORTHKIND <strong>FLOW</strong></a>
+<span class="status">LOCAL DEV ONLY · NO LIVE STAFF OR NOTIFICATIONS</span>
+<nav class="staff-page-nav" aria-label="Workspace"><a class="staff-link" href="/staff/knowledge">Hotel knowledge</a><a class="staff-link" href="/staff/operations">Hotel operations</a><a class="staff-link" href="/staff">Reception queue</a></nav></header>
+<main class="shell" style="padding-top:38px;padding-bottom:50px">
+<section class="panel">
+  <div class="section-label">NON-AI OPERATIONS · IT AND HOTEL SERVICE DESK</div>
+  <h1 style="font-size:clamp(32px,4vw,50px);margin:12px 0 7px;line-height:1.15;">Every request has an owner.</h1>
+  <p>Track internal IT faults, housekeeping, maintenance and guest-service work. Create a ticket, claim it, log work and resolve it. No AI is required.</p>
+  <div class="notice">Demonstration only. Uses synthetic hotels and local development keys. A queued event is not an email, WhatsApp message, or real hotel action.</div>
+  <div class="form-grid">
+    <div><label for="property">Hotel / tenant</label><select id="property"><option value="demo-hotel">Demo Hotel A</option><option value="demo-hotel-two">Demo Hotel B</option></select></div>
+    <div><label for="staff-key">Development staff key</label><input id="staff-key" type="password" autocomplete="off" placeholder="Set WF_DEV_STAFF_KEYS_JSON in the API environment"/></div>
+  </div>
+  <div class="actions"><button class="button secondary" type="button" id="refresh">Refresh ticket queue</button><span id="connection-status" class="result" role="status" aria-live="polite">Enter your development staff key to load tickets.</span></div>
+</section>
+<section class="columns" style="margin-top:22px">
+  <article class="panel"><div class="section-label">01 · CREATE TICKET</div><h2>Report a problem</h2>
+    <form id="ticket-form">
+      <div class="form-grid">
+        <div><label for="category">Department</label><select id="category"><option value="it">IT / connectivity</option><option value="reception">Reception</option><option value="housekeeping">Housekeeping</option><option value="maintenance">Maintenance</option><option value="kitchen">Kitchen / dining</option><option value="billing">Billing / finance</option><option value="general">General operations</option></select></div>
+        <div><label for="priority">Priority</label><select id="priority"><option value="normal">Normal · 24-hour target</option><option value="urgent">Urgent · 1-hour target</option><option value="high">High · 4-hour target</option><option value="low">Low · 72-hour target</option></select></div>
+      </div>
+      <label for="subject">Short issue title</label><input id="subject" required minlength="4" maxlength="160" placeholder="e.g. Reception Wi-Fi offline"/>
+      <label for="description">What happened?</label><textarea id="description" rows="4" minlength="8" maxlength="3000" required placeholder="Describe the issue, location, impact and what staff have already checked."></textarea>
+      <label for="source-case">Source reception enquiry ID (optional)</label><input id="source-case" maxlength="100" placeholder="Only for a claimed guest enquiry"/>
+      <p class="notice">Priority targets are suggested internal SLA clocks, not guaranteed response times. Only authorized staff should set priorities.</p>
+      <button type="submit" class="button primary" id="create">Create staff ticket</button>
+      <div id="form-status" class="result" role="status" aria-live="polite">No ticket submitted yet.</div>
+    </form>
+  </article>
+  <article class="panel"><div class="section-label">02 · TEAM METRICS</div><h2>Current work</h2>
+    <div id="metrics" role="status" aria-live="polite">Metrics load after staff key verification.</div>
+    <label for="status-filter">Filter by status</label><select id="status-filter"><option value="">All statuses</option><option value="open">Open</option><option value="assigned">Assigned</option><option value="in_progress">In progress</option><option value="resolved">Resolved</option><option value="reopened">Reopened</option></select>
+    <label for="category-filter">Filter by department</label><select id="category-filter"><option value="">All departments</option><option value="it">IT</option><option value="reception">Reception</option><option value="housekeeping">Housekeeping</option><option value="maintenance">Maintenance</option><option value="kitchen">Kitchen</option><option value="billing">Billing</option><option value="general">General</option></select>
+    <button type="button" class="button secondary" id="apply-filter" style="margin-top:16px;">Apply filters</button>
+  </article>
+</section>
+<section class="panel" aria-label="Ticket queue" style="margin-top:22px;"><div class="section-label">03 · WORK QUEUE</div><h2>Tickets</h2><p>Only this hotel's tickets are returned. Select a ticket to view its full internal history.</p>
+<div id="ticket-list" role="status" aria-live="polite">No tickets loaded.</div>
+</section>
+</main><footer class="shell footer">Worthkind Flow · IT & hotel service ticketing reference · Not authorized for production or real guest information.</footer>
+<script src="/static/tickets.js" defer></script></body></html>
