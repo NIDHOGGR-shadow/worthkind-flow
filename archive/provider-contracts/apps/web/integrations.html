@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Worthkind Flow — Hotel integration readiness (development)</title>
+<link rel="stylesheet" href="/static/styles.css"></head>
+<body>
+<a class="skip-link" href="#readiness-main">Skip to integration readiness</a>
+<header class="shell topbar">
+<a class="brand" href="/" aria-label="Worthkind Flow guest experience"><span class="mark">W</span> WORTHKIND <strong>FLOW</strong></a>
+<span class="status">DEVELOPMENT CONTRACTS · NO LIVE PROVIDERS</span>
+<nav class="staff-page-nav" aria-label="Staff navigation">
+<a class="staff-link" href="/staff/operations">Hotel operations</a>
+<a class="staff-link" href="/staff/knowledge">Knowledge review</a>
+<a class="staff-link" href="/staff">Reception</a>
+</nav>
+</header>
+<main class="shell staff-workspace" id="readiness-main">
+<section class="workspace-heading">
+<div><span class="eyebrow">HOTEL INFRASTRUCTURE / DEV STATUS</span>
+<h1>Know what is connected.</h1>
+<p>Check which provider capabilities are actually installed for a hotel. These adapter contracts are deliberately disabled until authorized providers and secure staff identities exist.</p></div>
+<span class="stage-pill">All real providers disconnected</span>
+</section>
+<div class="workspace-layout">
+<aside class="panel workspace-controls">
+<div class="section-label">01 · HOTEL CONTEXT</div>
+<h2>Development access</h2>
+<p>The current key is a shared test credential. It is not a production employee login.</p>
+<label for="property">Demo hotel</label>
+<select id="property"><option value="demo-hotel">Demo Hotel A</option><option value="demo-hotel-two">Demo Hotel B</option></select>
+<label for="staff-key">Development staff key</label>
+<div class="key-field">
+<input id="staff-key" type="password" autocomplete="off" spellcheck="false" placeholder="Key printed by the local runner">
+<button id="show-key" type="button" class="button secondary compact" aria-label="Show development key" aria-pressed="false">Show</button>
+</div>
+<button id="load-readiness" type="button" class="button primary block-button">Check provider connections</button>
+<p class="workspace-tip">Changing hotel or key clears all displayed information, even if a previous request is still loading.</p>
+<div class="notice">This screen never activates bookings, live payments, guest messages or AI. It shows only backend-reported readiness from the local development application.</div>
+</aside>
+<section class="workspace-main">
+<div class="section-label">02 · VERIFIED DEVELOPMENT STATE</div>
+<h2>Available integration adapters</h2>
+<p class="workspace-subtitle">Statuses are read from the web API—not from a static mock screen. A fixture/test result is not real hotel or provider evidence.</p>
+<p class="result workspace-message" id="connection-message" role="status" aria-live="polite">Select a hotel and enter its local development key.</p>
+<div id="readiness-content" hidden>
+<div class="ops-source"><strong id="readiness-property">—</strong><span id="readiness-source">—</span></div>
+<div class="ops-detail-grid"><section class="panel ops-detail">
+<h3>Provider authority</h3><p id="authority" class="ops-warning">No source checked.</p>
+<div id="providers" class="knowledge-items"></div>
+</section><section class="panel ops-detail">
+<h3>What must happen before activation</h3>
+<p>Each integration requires a hotel-authorized service and verified staff role permissions. Payment and PMS source verification must happen server-side; AI answers must remain grounded in approved hotel knowledge.</p>
+<div class="ops-data-list">
+<div class="ops-data-row"><span>Hotel inventory & reservations</span><strong>Authoritative PMS required</strong></div>
+<div class="ops-data-row"><span>Guest payment verification</span><strong>Hotel payment processor required</strong></div>
+<div class="ops-data-row"><span>Guest communications</span><strong>Provider event delivery proof required</strong></div>
+<div class="ops-data-row"><span>Optional AI assistance</span><strong>Permission, evidence & guardrails required</strong></div>
+</div>
+<p class="workspace-tip">This list is a release checklist, not live configuration. No API keys or network connections are added through this screen.</p>
+</section></div></div>
+<div id="readiness-empty" class="case-empty">No provider state loaded. Nothing is assumed connected.</div>
+</section></div>
+</main>
+<footer class="shell footer">Worthkind Flow · Normal web app using SQLite only during development; Supabase provisioning deferred.</footer>
+<script src="/static/integrations.js" defer></script>
+</body></html>
