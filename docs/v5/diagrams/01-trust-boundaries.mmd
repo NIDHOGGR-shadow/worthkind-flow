@@ -1,0 +1,67 @@
+flowchart LR
+  subgraph channels ["People, channels and providers"]
+    Guest["Guest: website, WhatsApp, voice"]
+    Staff["Staff: hotel console"]
+    Provider["PMS, payment and delivery callbacks"]
+  end
+  subgraph entry ["Entry and identity boundary"]
+    Tenant["Resolve verified property / tenant"]
+    StaffAuth["Authenticate staff and enforce role"]
+    Hook["Verify webhook signature and event id"]
+    GuestScope["Guest session and purpose check"]
+    HardRules["Emergency and human-bypass rules"]
+  end
+  subgraph intelligence ["Read-only intelligence path"]
+    ReadPolicy["Read authorization and tenant filter"]
+    KB["Versioned hotel knowledge, scoped retrieval"]
+    Route["Rules first; evaluated optional ML / LLM"]
+  end
+  subgraph transactions ["Authorized business action path"]
+    WritePolicy["Write policy and explicit consent"]
+    Domain["Booking / support / dining modules"]
+    Commit["Atomic state + audit + outbox commit"]
+    Inbound["Idempotent provider event reconciliation"]
+    Worker["Outbox delivery worker and retries"]
+    Handoff["Human-owned case queue and SLA"]
+  end
+  subgraph stores ["Authoritative data and external integrations"]
+    DB[("Tenant-isolated PostgreSQL")]
+    Hotel["Hotel PMS / POS / booking engine"]
+    PSP["Authorized payment provider"]
+    Notify["Outbound messaging gateway"]
+    Response["Response to guest or staff"]
+    Observe["Metrics, audit and spend budgets"]
+  end
+  Guest --> Tenant
+  Staff --> StaffAuth
+  Provider --> Hook
+  Tenant --> GuestScope
+  GuestScope --> HardRules
+  HardRules -->|"Human or urgent"| Handoff
+  HardRules -->|"Direct self-service"| WritePolicy
+  HardRules -->|"AI / FAQ"| ReadPolicy
+  StaffAuth --> ReadPolicy
+  StaffAuth --> WritePolicy
+  ReadPolicy --> KB
+  KB --> Route
+  Route -->|"Evidence available"| Response
+  Route -->|"Approved proposed action"| WritePolicy
+  Route -->|"Unknown or uncertain"| Handoff
+  WritePolicy --> Domain
+  Domain --> Commit
+  Commit --> DB
+  Commit --> Worker
+  Worker --> Hotel
+  Worker --> PSP
+  Worker --> Notify
+  Hook --> Inbound
+  Inbound --> Commit
+  Domain -->|"Needs staff"| Handoff
+  Handoff -->|"Staff disposition"| Commit
+  Handoff --> Response
+  Worker -->|"Confirmed or failed result"| Response
+  Response --> Guest
+  Response --> Staff
+  Commit --> Observe
+  Handoff --> Observe
+  Route --> Observe

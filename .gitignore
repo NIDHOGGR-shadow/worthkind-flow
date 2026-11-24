@@ -1,0 +1,21 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+*.sqlite
+*.sqlite3
+*.db
+.env
+.env.*
+!.env.example
+ml/artifacts/
+ml/reports/
+ml/private_data/
+dist/
+node_modules/
+
+# Local-first developer runner (SQLite and private per-hotel demo keys)
+.local/
+*.sqlite3-journal
+*.sqlite3-wal
+*.sqlite3-shm

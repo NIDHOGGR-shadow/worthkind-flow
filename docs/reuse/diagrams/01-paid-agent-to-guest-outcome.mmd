@@ -1,0 +1,33 @@
+flowchart TD
+    A[Hotel signs up] --> B[Verify company, owner and property]
+    B --> C[Invite staff and configure roles]
+    C --> D[Select plan and optional AI modules]
+    D --> E[Worthkind subscription checkout]
+    E --> F{Verified payment and entitlement?}
+    F -->|No or ambiguous| G[Pending or disabled, manual support still available]
+    F -->|Yes| H[Activate subscription with usage limits]
+    H --> I[Hotel reviews knowledge, domains and escalation]
+    I --> J[Issue public widget ID, allowlisted install domain]
+    J --> K[Hotel embeds widget or enables channel]
+    K --> L[Guest starts request]
+    L --> M{Agent enabled, within budget and policy?}
+    M -->|No| N[Direct form or human staff queue]
+    M -->|Yes| O[Approved hotel knowledge and scoped agent]
+    O --> P{Needs privileged action?}
+    P -->|No| Q[Answer with cited hotel knowledge or abstain]
+    P -->|Yes| R[Validate identity, role, explicit guest confirmation]
+    R --> S[Typed backend domain handler]
+    S --> T{Authoritative PMS, PSP or staff outcome?}
+    T -->|Confirmed| U[Record verified business outcome]
+    T -->|Unknown or failed| V[Open human or finance exception]
+    G --> N
+    Q --> W[Meter idempotent usage and observe]
+    U --> W
+    V --> W
+    N --> X[Claim, acknowledge and resolve with staff]
+    X --> Y[Transactional audit plus outbox]
+    W --> Y
+    Y --> Z[Owner dashboard, alerts, billing and cost]
+    Z --> AA{Renewed, cancelled or cap reached?}
+    AA -->|Renewed| H
+    AA -->|Cancelled or cap reached| G

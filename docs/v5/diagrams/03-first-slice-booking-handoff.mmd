@@ -1,0 +1,33 @@
+flowchart TD
+  Start["Guest opens property website"] --> Choice{"Use AI, self-service or human?"}
+  Choice -->|"Human"| CreateCase["Create staff booking enquiry case"]
+  Choice -->|"Self-service"| Native["Open hotel's native booking engine"]
+  Choice -->|"AI"| Tenant["Resolve property and safe guest session"]
+  Tenant --> Intent["Rule routing with optional grounded answers"]
+  Intent --> Dates["Collect dates, room and guest requirements"]
+  Dates --> Adapter{"Authorized live PMS adapter ready?"}
+  Adapter -->|"No: current demo"| CreateCase
+  Adapter -->|"Yes"| Quote["Fetch verified inventory and full quote"]
+  Quote --> Accept{"Guest approves terms and amount?"}
+  Accept -->|"No"| Stop["No reservation or charge"]
+  Accept -->|"Yes"| Hold["Native room hold if provider supports it"]
+  Hold --> Checkout["Secure checkout reference, idempotent"]
+  Checkout --> Pay["Payment provider: signed verified event"]
+  Pay --> Verify{"Reference, amount and currency verified?"}
+  Verify -->|"No / unknown"| Reconcile["Assigned payment reconciliation case"]
+  Verify -->|"Yes"| PMS["Ask authoritative PMS to confirm reservation"]
+  PMS --> Confirm{"Provider issued booking confirmation?"}
+  Confirm -->|"No / unknown"| Reconcile
+  Confirm -->|"Yes"| Success["Send confirmed reference and update hotel"]
+  CreateCase --> Assign["Reception queue with staff owner"]
+  Assign --> Ack{"Acknowledged within staffed-hour SLA?"}
+  Ack -->|"No"| Escalate["Supervisor and alternate contact escalation"]
+  Ack -->|"Yes"| Resolve["Hotel replies or completes native booking"]
+  Escalate --> Resolve
+  Resolve --> HumanResult["Guest sees verified staff outcome"]
+  Reconcile --> Finance["Finance + reception track resolution"]
+  Finance --> HumanResult
+  Native --> Complete["Existing booking system owns completion"]
+  Success --> Metrics["Audit, revenue and task outcome metrics"]
+  HumanResult --> Metrics
+  Complete --> Metrics

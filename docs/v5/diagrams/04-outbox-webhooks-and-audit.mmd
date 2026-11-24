@@ -1,0 +1,26 @@
+flowchart TD
+  Call["Authenticated domain command + idempotency key"] --> Validate["Check tenant, role, state and consent"]
+  Validate --> Tx["Begin PostgreSQL transaction"]
+  Tx --> Update["Write domain state change"]
+  Update --> Audit["Write immutable audit event"]
+  Audit --> Outbox["Write outbox event"]
+  Outbox --> Commit{"Commit all three atomically?"}
+  Commit -->|"No"| Failed["Roll back; no queued side effect"]
+  Commit -->|"Yes"| Worker["Worker reads unprocessed outbox records"]
+  Worker --> External["Send signed/idempotent provider action"]
+  External --> Result{"Provider acknowledgement?"}
+  Result -->|"No / timeout"| Retry["Backoff + capped retry + dead-letter alert"]
+  Retry --> Worker
+  Result -->|"Yes"| Pending["Await verified final provider status"]
+  Webhook["External provider callback"] --> Signature["Verify signature, time and replay key"]
+  Signature --> Inbox["Persist unique inbox event"]
+  Inbox --> Reconcile["Match tenant, booking and operation"]
+  Pending --> Reconcile
+  Reconcile --> State{"Confirmed result or mismatch?"}
+  State -->|"Mismatch / unknown"| Case["Assign finance or operations exception"]
+  State -->|"Confirmed"| Final["Commit verified state + audit + outbox"]
+  Final --> Notify["Send user and staff notifications"]
+  Case --> Notify
+  Notify --> Measure["Track errors, latency, cost, reconciliation backlog"]
+  Failed --> Measure
+  Retry --> Measure

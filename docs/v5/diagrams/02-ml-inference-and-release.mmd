@@ -1,0 +1,47 @@
+flowchart TB
+  subgraph build ["Build and release: version all artifacts"]
+    Docs["Hotel-approved source documents"] --> Ingest["Validate source, owner, effective date"]
+    Ingest --> Index["Versioned per-tenant retrieval index"]
+    Examples["Approved redacted test cases"] --> Eval["Evaluate rules, retrieval, prompts, schemas"]
+    Index --> Eval
+    Eval --> Gate{"Pass fixed-set release thresholds?"}
+    Gate -->|"No"| Hold["Reject change; retain known-good release"]
+    Gate -->|"Yes"| Shadow["Shadow / staged comparison"]
+    Shadow --> Diff{"No material safety regressions?"}
+    Diff -->|"No"| Hold
+    Diff -->|"Yes"| Release["Canary, version and monitor"]
+    Labels["Consented labelled production examples"] -.-> Train["Later: optional ML training"]
+    Train -.-> Eval
+  end
+  subgraph runtime ["Runtime: every incoming message"]
+    Incoming["Guest message or call"] --> Tenant["Resolve property, session and consent"]
+    Tenant --> Override{"Human request or emergency?"}
+    Override -->|"Yes"| Case["Create tracked human case"]
+    Override -->|"No"| Rules["Deterministic intent and fast FAQ path"]
+    Rules -->|"Clearly known"| Read["Tenant-scoped read policy"]
+    Rules -->|"Uncertain"| Optional["Optional evaluated model inference"]
+    Optional --> Read
+    Read --> Retrieval["Only approved property knowledge / source tools"]
+    Retrieval --> Evidence{"Grounded with sufficient evidence?"}
+    Evidence -->|"No"| Clarify["Clarify once or create human case"]
+    Clarify -->|"Still uncertain"| Case
+    Clarify -->|"More information"| Rules
+    Evidence -->|"Yes: read"| Reply["Reply using verified information"]
+    Evidence -->|"Yes: action"| ActPolicy["Action policy and scoped authorization"]
+    ActPolicy --> Confirm{"Money or material change?"}
+    Confirm -->|"Yes"| UserConfirm["Guest explicit confirmation"]
+    Confirm -->|"No"| Tool["Authorized deterministic domain tool"]
+    UserConfirm --> Tool
+    Tool --> Result{"Authoritative system succeeded?"}
+    Result -->|"No / unknown"| Recover["Retry safely, reconcile or escalate"]
+    Result -->|"Yes"| Reply
+    Recover --> Case
+    Case --> Staff["Staff acknowledges, works, closes case"]
+    Staff --> Reply
+    Reply --> Monitor["Log outcome, latency, errors, handoff and cost"]
+    Case --> Monitor
+    Recover --> Monitor
+    Release --> Optional
+    Release --> Retrieval
+    Monitor -.-> Eval
+  end
