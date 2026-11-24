@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Worthkind Flow — Hotel knowledge review (development)</title>
+<link rel="stylesheet" href="/static/styles.css"></head>
+<body>
+<a class="skip-link" href="#knowledge-content">Skip to hotel knowledge</a>
+<header class="shell topbar">
+<a class="brand" href="/"><span class="mark">W</span> WORTHKIND <strong>FLOW</strong></a>
+<span class="status">SQLITE DEVELOPMENT · NOT HOTEL-APPROVED CONTENT</span>
+<nav class="staff-page-nav" aria-label="Staff navigation">
+<a class="staff-link" href="/staff/operations">Operations</a>
+<a class="staff-link" href="/staff/tickets">Tickets</a>
+<a class="staff-link" href="/staff">Reception</a>
+</nav></header>
+<main class="shell staff-workspace">
+<section class="workspace-heading">
+<div><span class="eyebrow">HOTEL CONTENT / DEVELOPMENT</span>
+<h1>Knowledge that earns trust.</h1>
+<p>Prepare a factual answer, review a version before publishing, and withdraw it if it becomes outdated. Only approved records are returned by the guest FAQ. No AI model or external CMS is involved.</p></div>
+<span class="stage-pill">Development reviewer, not verified hotel manager</span>
+</section>
+<div class="workspace-layout">
+<aside class="panel workspace-controls" aria-labelledby="access-heading">
+<div class="section-label">01 · PROPERTY AND KEY</div><h2 id="access-heading">Development access</h2>
+<p>Every editing and review action uses a synthetic hotel's local key, not real staff accounts or commercial content permissions.</p>
+<label for="property">Demo hotel</label><select id="property">
+<option value="demo-hotel">Demo Hotel A</option><option value="demo-hotel-two">Demo Hotel B</option>
+</select>
+<label for="staff-key">Development staff key</label>
+<div class="key-field"><input id="staff-key" type="password" autocomplete="off" spellcheck="false" placeholder="Local demo key">
+<button id="show-key" type="button" class="button secondary compact" aria-label="Show development key" aria-pressed="false">Show</button></div>
+<button id="load-knowledge" type="button" class="button primary block-button">Load this hotel's knowledge</button>
+<p class="workspace-tip">Changing the property or key clears all previous information and pending input.</p>
+<div class="notice">Approval here means approved in the local development workflow, not verified by a real hotel owner or automatically authorized for production.</div>
+</aside>
+<section class="workspace-main" id="knowledge-content" aria-labelledby="contents-heading">
+<div class="section-label">02 · KNOWLEDGE AND REVIEW</div>
+<h2 id="contents-heading">Hotel-specific content</h2>
+<p id="message" role="status" aria-live="polite" class="result workspace-message">Enter your hotel's local development key and load its records.</p>
+<div id="knowledge-data" hidden>
+<div class="ops-source"><strong id="loaded-property">—</strong><span>Source: local SQLite · Not external hotel verified</span></div>
+<div class="ops-detail-grid">
+<section class="panel ops-detail" aria-labelledby="facts-title">
+<h3 id="facts-title">Current public FAQ facts</h3>
+<p class="workspace-subtitle">Approved rows are visible to guests. Withdrawn rows are retained but hidden.</p>
+<div id="facts" class="knowledge-items"></div>
+</section>
+<section class="panel ops-detail" aria-labelledby="drafts-title">
+<h3 id="drafts-title">Drafts awaiting review</h3>
+<p class="workspace-subtitle">A draft cannot change public information until reviewed.</p>
+<div id="drafts" class="knowledge-items"></div>
+<label for="review-reason">Review explanation (required for reject or withdraw)</label>
+<textarea id="review-reason" rows="2" minlength="8" maxlength="500" placeholder="Record why a draft was rejected or an answer withdrawn"></textarea>
+</section>
+<section class="panel ops-detail" aria-labelledby="new-draft-title">
+<h3 id="new-draft-title">Propose a knowledge change</h3>
+<form id="draft-form">
+<label for="question-key">Knowledge category</label>
+<select id="question-key" required>
+<option value="name">Hotel name</option>
+<option value="booking">Booking and rooms</option>
+<option value="staff">Staff and contact</option>
+<option value="dining">Dining and menus</option>
+<option value="events">Events</option>
+<option value="parking">Parking</option>
+<option value="checkin">Check-in</option>
+<option value="checkout">Check-out</option>
+<option value="amenities">Amenities</option>
+<option value="accessibility">Accessibility</option>
+<option value="cancellation">Cancellation and refunds</option>
+</select>
+<label for="draft-answer">Proposed guest-facing answer</label>
+<textarea id="draft-answer" rows="5" required minlength="8" maxlength="2000" placeholder="Write only information supported by an actual approved source. Use synthetic content during development."></textarea>
+<label for="source-reference">Source or approval reference (development)</label>
+<input id="source-reference" required minlength="8" maxlength="240" placeholder="Synthetic reference used to verify this answer">
+<p class="workspace-tip">Creating a draft does not publish it. A manager identity and approvals policy are needed in production.</p>
+<button id="draft-submit" type="submit" class="button primary">Save unpublished draft</button>
+<p id="draft-message" role="status" aria-live="polite" class="result"></p>
+</form>
+</section>
+<section class="panel ops-detail" aria-labelledby="preview-title">
+<h3 id="preview-title">Test what guests can see</h3>
+<p class="workspace-subtitle">Asks the real public FastAPI FAQ in the selected development property; no AI or provider request.</p>
+<label for="preview-question">Public guest question</label>
+<textarea id="preview-question" rows="3" placeholder="Does this hotel have a restaurant menu?"></textarea>
+<button id="preview-button" type="button" class="button secondary">Check public FAQ</button>
+<p id="preview-result" role="status" aria-live="polite" class="result">No public question checked.</p>
+<h4>Revision history</h4>
+<div id="revisions" class="knowledge-items"></div>
+</section>
+</div>
+</div>
+<div id="knowledge-empty" class="case-empty">Load a hotel's development records to review its approved facts and unpublished drafts.</div>
+</section>
+</div>
+</main>
+<footer class="shell footer">Worthkind Flow · SQLite development workflow. Real hotel content requires verified authority, staff roles and a production release process.</footer>
+<script src="/static/knowledge.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Worthkind Flow — Hotel operations (development)</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#overview">Skip to operational overview</a>
+  <header class="shell topbar">
+    <a class="brand" href="/" aria-label="Worthkind Flow guest experience"><span class="mark">W</span> WORTHKIND <strong>FLOW</strong></a>
+    <span class="status">LOCAL SQLITE · DEVELOPMENT ONLY</span>
+    <nav class="staff-page-nav" aria-label="Staff navigation">
+      <a class="staff-link" href="/staff/knowledge">Hotel knowledge</a><a class="staff-link" href="/staff">Reception</a>
+      <a class="staff-link" href="/staff/tickets">Department tickets</a>
+      <a class="staff-link" href="/">Guest experience</a>
+    </nav>
+  </header>
+  <main class="shell staff-workspace">
+    <section class="workspace-heading">
+      <div>
+        <span class="eyebrow">MANAGEMENT WORKSPACE / DEVELOPMENT</span>
+        <h1>Hotel operations, grounded.</h1>
+        <p>See the cases, tickets and event records that actually exist in the selected hotel's local SQLite database. No invented revenue, room occupancy or external delivery figures.</p>
+      </div>
+      <span class="stage-pill">Not production connected</span>
+    </section>
+    <div class="workspace-layout">
+      <aside class="panel workspace-controls" aria-labelledby="access-title">
+        <div class="section-label">01 · HOTEL CONTEXT</div>
+        <h2 id="access-title">Development access</h2>
+        <p>Property-scoped demo staff credentials only. This is not a verified owner or manager sign-in.</p>
+        <label for="property">Demo hotel</label>
+        <select id="property">
+          <option value="demo-hotel">Demo Hotel A</option>
+          <option value="demo-hotel-two">Demo Hotel B</option>
+        </select>
+        <label for="staff-key">Local development staff key</label>
+        <div class="key-field">
+          <input id="staff-key" type="password" autocomplete="off" spellcheck="false" placeholder="Key shown by local runner">
+          <button id="show-key" type="button" class="button secondary compact" aria-label="Show development staff key" aria-pressed="false">Show</button>
+        </div>
+        <button id="load-overview" type="button" class="button primary block-button">Load operational summary</button>
+        <p class="workspace-tip">Changing hotel or key clears the entire view. This page never saves keys in your browser.</p>
+        <div class="notice">Local events are database records, not sent or delivered notifications. Live bookings and financial data are unavailable.</div>
+      </aside>
+      <section class="workspace-main">
+        <div class="section-label">02 · SOURCE-BASED SUMMARY</div>
+        <h2>Property overview</h2>
+        <p class="workspace-subtitle">Only data returned from the selected hotel's local SQLite backend appears below.</p>
+        <p id="message" class="result workspace-message" role="status" aria-live="polite">Select a hotel, enter its development key and load the summary.</p>
+        <div id="overview" hidden>
+          <div class="ops-source" aria-label="Data provenance">
+            <strong id="property-name">—</strong>
+            <span>Source: local SQLite development database</span>
+            <span id="generated-at">Not loaded</span>
+          </div>
+          <div class="workspace-stats ops-stats">
+            <div class="workspace-stat"><span>Total guest enquiries</span><strong id="case-total">—</strong></div>
+            <div class="workspace-stat"><span>Queued enquiries</span><strong id="case-queued">—</strong></div>
+            <div class="workspace-stat"><span>Unresolved tickets</span><strong id="ticket-unresolved">—</strong></div>
+            <div class="workspace-stat"><span>Overdue tickets</span><strong id="ticket-overdue">—</strong></div>
+            <div class="workspace-stat"><span>Responded enquiries</span><strong id="case-responded">—</strong></div>
+            <div class="workspace-stat"><span>Pending local events</span><strong id="events-pending">—</strong></div>
+          </div>
+          <div class="ops-detail-grid">
+            <section class="panel ops-detail" aria-labelledby="case-title">
+              <h3 id="case-title">Guest service queue</h3>
+              <p class="workspace-subtitle">Current case statuses from SQLite, not estimated guest activity.</p>
+              <div id="case-statuses" class="ops-data-list"></div>
+              <h4>Enquiry categories</h4>
+              <div id="case-kinds" class="ops-data-list"></div>
+            </section>
+            <section class="panel ops-detail" aria-labelledby="ticket-title">
+              <h3 id="ticket-title">Department work</h3>
+              <p class="workspace-subtitle">Current tickets, with unresolved and overdue tracked separately.</p>
+              <div id="ticket-statuses" class="ops-data-list"></div>
+              <h4>Ticket categories</h4>
+              <div id="ticket-categories" class="ops-data-list"></div>
+              <p id="invalid-due" class="workspace-tip"></p>
+            </section>
+            <section class="panel ops-detail" aria-labelledby="event-title">
+              <h3 id="event-title">Pending internal events</h3>
+              <p class="workspace-subtitle">These numbers do not establish any real-world provider delivery.</p>
+              <div id="event-counts" class="ops-data-list"></div>
+              <p class="ops-warning">Notification delivery: not connected.</p>
+              <h4>Not available yet</h4>
+              <p class="workspace-subtitle">Confirmed reservations, occupancy, hotel revenue, payment verification and AI usage require separate authorized source systems.</p>
+            </section>
+            <section class="panel ops-detail" aria-labelledby="activity-title">
+              <h3 id="activity-title">Recent local activity</h3>
+              <p class="workspace-subtitle">Last recorded case and ticket transitions, without guest contact details.</p>
+              <div id="activity-list" class="ops-activity-list"></div>
+            </section>
+          </div>
+          <section class="panel ops-detail ops-attention" aria-labelledby="attention-title">
+            <h3 id="attention-title">Department work needing attention</h3>
+            <p class="workspace-subtitle">A review queue calculated from the selected hotel's SQLite deadlines. It flags overdue, due-soon and invalid-date tickets but does not dispatch or notify anyone.</p>
+            <button id="attention-load" type="button" class="button secondary">Review deadline queue</button>
+            <p id="attention-message" role="status" aria-live="polite" class="result">No deadline queue loaded.</p>
+            <div id="attention-list" class="ops-activity-list" aria-label="Department attention queue"></div>
+            <a class="staff-link" href="/staff/tickets">Open the department ticket workspace</a>
+          </section>
+        </div>
+        <div id="overview-empty" class="case-empty">No operations data loaded. Zero counts will be shown only after the local API confirms them.</div>
+      </section>
+    </div>
+  </main>
+  <footer class="shell footer">Worthkind Flow · Development source dashboard. No actual hotel accounts, PMS, PSP, outbound messaging or AI provider connected.</footer>
+  <script src="/static/operations.js" defer></script>
+</body>
+</html>
