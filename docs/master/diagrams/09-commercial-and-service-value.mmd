@@ -1,0 +1,21 @@
+flowchart TD
+  Prospect["Hotel buyer problem discovery and competition research"]
+  ICP{"Relevant operational loss and budget owner?"}
+  NotYet["Disqualify or maintain permissioned followup"]
+  Wait["Explicit early access consent with evidence"]
+  Demo["Real demo: guest enquiry to human case; no fake booking"]
+  Pilot["Written scoped pilot with responsible hotel operator"]
+  Track["Baseline: enquiries, time-to-accept, resolutions, cost"]
+  Value{"Verified measured benefit and willingness to pay?"}
+  Redesign["Improve workflow or choose another problem"]
+  Contract["Approved service contract, pricing, SLA and DPA"]
+  Deploy["Secure hotel onboarding and staged release"]
+  Cost["Worthkind MRR/ARR, Meta/voice/AI/infra costs separately"]
+  Outcome["Hotel-reported service quality and PMS-confirmed GMV separately"]
+  Prospect --> ICP
+  ICP -->|"No"| NotYet
+  ICP -->|"Yes"| Wait --> Demo --> Pilot --> Track --> Value
+  Value -->|"No"| Redesign --> Prospect
+  Value -->|"Yes"| Contract --> Deploy
+  Deploy --> Cost
+  Deploy --> Outcome
