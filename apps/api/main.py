@@ -493,3 +493,7 @@ def postgres_staff_reply_v1(
         subject, slug, action="case:reply",
         case_id=case_id, reply_message=body.message,
     )
+
+
+from staff_lifecycle import install_staff_lifecycle_routes
+install_staff_lifecycle_routes(app)
