@@ -24,7 +24,7 @@ import pytest
 
 MIGRATIONS = [
     Path(__file__).resolve().parents[3] / "db" / "migrations" / name
-    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql", "008_hotel_onboarding_settings.sql", "009_identity_provisioning.sql", "010_guest_quota.sql")
+    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql", "008_hotel_onboarding_settings.sql", "009_identity_provisioning.sql", "010_guest_quota.sql", "011_private_documents.sql")
 ]
 
 
@@ -61,6 +61,7 @@ def pg():
         conn.execute("GRANT wf_property_config TO wf_ci_config")
         conn.execute("CREATE ROLE wf_ci_quota LOGIN NOINHERIT PASSWORD 'worthkind_ci_quota_only'")
         conn.execute("GRANT wf_guest_quota TO wf_ci_quota")
+        conn.execute("GRANT wf_document_store TO wf_ci_staff")
         yield conn
 
 
@@ -871,3 +872,19 @@ def test_guest_quota_is_atomic_and_scoped(pg, seeded):
             assert not conn.execute(query,("hotel-a","a"*64)).fetchone()[0]
             assert conn.execute(query,("hotel-b","a"*64)).fetchone()[0]
             assert conn.execute(query,("hotel-a","b"*64)).fetchone()[0]
+
+
+def test_private_document_database_boundary(pg, oidc_rig, monkeypatch):
+    client,key,source=oidc_rig
+    monkeypatch.setenv("WF_DOCUMENT_POSTGRES_DSN",os.environ["WF_STAFF_POSTGRES_DSN"])
+    owner=auth_header(signed_token(key,"idp:hotel-a-owner"))
+    other=auth_header(signed_token(key,"idp:hotel-b-reception"))
+    path="/api/v1/properties/hotel-a/staff/documents"
+    payload=b"synthetic hotel document"
+    response=client.post(path,content=payload,headers=owner)
+    assert response.status_code==201,response.text
+    doc=response.json()["document_id"]
+    assert client.get(path+"/"+doc,headers=owner).content==payload
+    assert client.get(path+"/"+doc,headers=other).status_code==403
+    stored=pg.execute("SELECT ciphertext FROM worthkind_flow.private_documents WHERE id=%s",(doc,)).fetchone()[0]
+    assert payload not in stored
