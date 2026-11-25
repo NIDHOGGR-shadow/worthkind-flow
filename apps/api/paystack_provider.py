@@ -34,7 +34,7 @@ def account(slug):
     except (KeyError,TypeError,ValueError):
         raise ProviderUnavailable("Hotel payment account unavailable") from None
 
-def call(cfg,method,path,payload=None):
+def call(cfg,method,path,payload=None,*,list_response=False):
     if not path.startswith("/") or path.startswith("//"):
         raise ProviderUnavailable("Invalid provider path")
     body=json.dumps(payload,separators=(",",":")).encode() if payload is not None else None
@@ -46,9 +46,9 @@ def call(cfg,method,path,payload=None):
         if len(raw)>524288:
             raise ValueError()
         result=json.loads(raw)
-        if not isinstance(result,dict) or result.get("status") is not True or not isinstance(result.get("data"),dict):
+        if not isinstance(result,dict) or result.get("status") is not True or not isinstance(result.get("data"),list if list_response else dict):
             raise ValueError()
-        return result["data"]
+        return {"data":result["data"],"meta":result.get("meta")} if list_response else result["data"]
     except (HTTPError,URLError,TimeoutError,OSError,ValueError):
         raise ProviderUnavailable("Paystack response unavailable or rejected") from None
 
@@ -102,3 +102,12 @@ def webhook_valid(cfg,body,new_header,legacy_header,now=None):
     if cfg.get("allow_legacy_webhook") is not True or not isinstance(legacy_header,str) or not re.fullmatch(r"[0-9a-f]{128}",legacy_header):
         return False
     return hmac.compare_digest(hmac.new(cfg["secret_key"].encode(),body,hashlib.sha512).hexdigest(),legacy_header)
+
+
+def settlements(cfg,page=1):
+    return call(cfg,"GET",f"/settlement?perPage=50&page={page}",list_response=True)
+
+def settlement_transactions(cfg,settlement_id,page=1):
+    if type(settlement_id) is not int or not 0<settlement_id<2**64:
+        raise ProviderUnavailable("Invalid settlement identifier")
+    return call(cfg,"GET",f"/settlement/{settlement_id}/transactions?perPage=50&page={page}",list_response=True)
