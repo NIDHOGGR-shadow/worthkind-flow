@@ -523,3 +523,6 @@ install_procurement_routes(app)
 
 from dining_pg import install_dining_routes
 install_dining_routes(app)
+
+from staff_operations_pg import install_staff_operations
+install_staff_operations(app)
