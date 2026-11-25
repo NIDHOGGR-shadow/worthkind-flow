@@ -87,3 +87,11 @@ The v1 API now deliberately requires different server-only settings:
 The earlier shared `WF_POSTGRES_DSN` is **not** used by these v1 functions. CI creates two disposable NOINHERIT logins with test-only credentials, verifies both API paths and denies cross-role commands. No actual managed DB roles have been provisioned.
 
 **Security caveat:** This limits accidental permission blast radius but does not protect an attacker who obtains a database password and issues arbitrary SQL under its authorized roles. Production must ensure only the backend can reach PostgreSQL, use TLS and credential rotation, add narrowly scoped function ownership, monitor queries, and never expose unrestricted SQL or private DSNs to the browser. Schema changes are still draft, not authorized for a real database.
+
+
+## Standalone Flow continuation (25 November 2026)
+- Migration 005 denies runtime case reads when a property or organization is inactive.
+- Migration 006 and /api/v1/properties/{slug}/staff/memberships/{invite,accept,revoke} manage existing identity-provider subjects, audited atomically. The private WF_STAFF_LIFECYCLE_POSTGRES_DSN login may SET ROLE wf_staff_lifecycle only. Owner bootstrapping, identity-provider account creation and sending invite emails remain separate. A revoked membership cannot be silently reactivated.
+- Migration 007 and apps/api/event_projector.py build a durable internal case activity ledger. Configure a distinct private WF_EVENT_PROJECTOR_POSTGRES_DSN login with only wf_event_projector role access. Run from apps/api with python event_projector.py, or add --once for a single bounded batch. Concurrent workers use SKIP LOCKED and atomic projection; failed transactions leave work pending. This is not a notification worker and does not update external delivery state.
+- CI run 45687757148 passed the PostgreSQL integration and SQLite runtime jobs at commit 86ba045f18e20f77cc15f2398fa7d314de92bf65 (before migrations 006 and 007). New changes need their own passing CI evidence.
+- No dedicated hosted Flow database has been identified; do not point the Flow credentials at the landlord, Hotel OS or Student Creators database. Production startup remains blocked. Private role credentials, function ownership hardening, TLS, secrets/key management, hosted verification and full migration are still outstanding.
