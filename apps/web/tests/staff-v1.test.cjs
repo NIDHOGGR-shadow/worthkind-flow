@@ -63,3 +63,37 @@ test("stale response from prior property cannot update workspace",async()=>{
  assert.equal(await ctx.run(async slug=>slug),"hotel-b");release();await assert.rejects(previous);
  assert.equal(ctx.slug,"hotel-b");assert.equal(ctx.busy,false);
 });
+
+test("Q2 roster and shift contracts enforce date ranges and membership identifiers",async()=>{
+ const calls=[],start="2026-11-25T08:00:00.000Z",end="2026-11-25T16:00:00.000Z";
+ const api=staffApi(async(url,options)=>{calls.push({url,options});return ok(url.includes("/schedule?")?{members:[{membership_id:id}],shifts:[{id,membership_id:id,state:"scheduled"}]}:url.endsWith("/cancel")?{id,state:"cancelled"}:url.includes("/profiles/")?{membership_id:id}:{id,state:"scheduled"})},identity);
+ await api.schedule("hotel-a",start,end);
+ await api.saveProfile("hotel-a",id,{display_name:"Test staff",job_title:"Reception",employee_reference:"EMP-01"});
+ await api.createShift("hotel-a",id,start,end);
+ await api.cancelShift("hotel-a",id);
+ assert.match(calls[0].url,/\/schedule\?start=/);
+ assert.deepEqual(JSON.parse(calls[2].options.body),{membership_id:id,starts_at:start,ends_at:end});
+ await assert.rejects(api.createShift("hotel-a",id,end,start));
+ await assert.rejects(api.schedule("hotel-a",start,"2027-11-25T16:00:00.000Z"));
+ await assert.rejects(api.createShift("hotel-a","invalid",start,end));
+ assert.equal(calls.length,4);
+});
+test("Q2 room condition requires revision and confirms matching server update",async()=>{
+ const calls=[];const api=staffApi(async(url,options)=>{calls.push({url,options});return ok(options.method==="GET"?{rooms:[{id,label:"312",room_type_id:id,operational_state:"dirty",revision:2}]}:{id,operational_state:"inspecting",revision:3})},identity);
+ await api.rooms("hotel-a");await api.roomState("hotel-a",id,"inspecting",2);
+ assert.deepEqual(JSON.parse(calls[1].options.body),{state:"inspecting",revision:2});
+ await assert.rejects(api.roomState("hotel-a",id,"available",2));await assert.rejects(api.roomState("hotel-a",id,"clean",0));
+ assert.equal(calls.length,2);
+ await assert.rejects(staffApi(async()=>ok({id,operational_state:"clean",revision:2}),identity).roomState("hotel-a",id,"clean",2));
+});
+test("Q2 reception control includes reason and explicit transfer target",async()=>{
+ const calls=[];const api=staffApi(async(url,options)=>{const b=JSON.parse(options.body);calls.push(b);return ok({case_id:id,state:{transfer:"claimed",escalate:"escalated",resolve:"resolved"}[b.action]});},identity);
+ await api.caseControl("hotel-a",id,"transfer","Transfer to reception",id);
+ await api.caseControl("hotel-a",id,"escalate","Manager review required");
+ await api.caseControl("hotel-a",id,"resolve","Staff work completed");
+ assert.deepEqual(calls[0],{action:"transfer",reason:"Transfer to reception",target_membership_id:id});
+ assert.equal(calls[1].target_membership_id,null);
+ await assert.rejects(api.caseControl("hotel-a",id,"transfer","Transfer to reception","invalid"));
+ await assert.rejects(api.caseControl("hotel-a",id,"resolve","short"));
+ assert.equal(calls.length,3);
+});
