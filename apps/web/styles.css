@@ -315,3 +315,7 @@ fieldset:disabled{opacity:.72}
 #guest-ai form{max-width:700px}
 @media(max-width:1023px){.staff-module-layout{grid-template-columns:minmax(0,1fr);gap:16px}.staff-module-layout .staff-v1-nav{grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 20px;border-right:0;border-bottom:1px solid #e5e5e5;padding:0 0 18px}.staff-nav-group{align-content:start}.staff-nav-group h2{margin:0 8px 6px}}
 @media(max-width:599px){.staff-module-layout .staff-v1-nav{gap:12px 8px}.staff-module-layout .staff-v1-nav button{font-size:13px;padding:8px;line-height:1.35}.staff-nav-group h2{font-size:11px}.staff-module-layout{padding-top:14px;gap:12px}#staff-workspace .staff-module-body>[data-panel]{padding:10px 0 24px}}
+
+/* Native grouped module selector avoids twenty navigation controls above mobile content. */
+.staff-mobile-modules{display:none;min-width:0}
+@media(max-width:1023px){.staff-module-layout .staff-v1-nav{display:none}.staff-mobile-modules{display:block;border-bottom:1px solid #e5e5e5;padding:0 0 14px}.staff-mobile-modules label{margin:0 0 6px}.staff-mobile-modules select{width:100%;min-height:48px}.staff-module-layout{gap:16px}}
