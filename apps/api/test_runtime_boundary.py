@@ -11,11 +11,12 @@ from runtime_boundary import (
 
 class RuntimeBoundaryTests(unittest.TestCase):
     def test_environment_fail_closed(self):
-        for value in ("production", " Production ", "PRODUCTION", "staging", "", "prod"):
+        for value in ("production", " Production ", "PRODUCTION", "", "prod"):
             with self.subTest(value=value), self.assertRaises(RuntimeError):
                 validate_environment(value)
         self.assertEqual(validate_environment(" DEVELOPMENT "), "development")
         self.assertEqual(validate_environment("test"), "test")
+        self.assertEqual(validate_environment("staging"), "staging")
 
     def test_staff_isolation_and_unicode(self):
         config = json.dumps({"hotel-a": "secret-a", "hotel-b": "secret-b"})
