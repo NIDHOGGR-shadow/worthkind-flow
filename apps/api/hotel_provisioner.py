@@ -10,6 +10,7 @@ COMMANDS = {
     "identity": "SELECT worthkind_flow.register_staff_identity(%s,%s,%s)",
     "payments": "SELECT worthkind_flow.configure_hotel_payments(%s,%s,%s,%s,%s::boolean)",
     "cloudbeds": "SELECT worthkind_flow.configure_cloudbeds(%s,%s,%s,%s,%s::boolean)",
+    "native-booking": "SELECT worthkind_flow.configure_native_bookings(%s,%s,%s::boolean)",
 }
 
 
@@ -29,6 +30,7 @@ def main():
         ("identity", ["subject","operator","evidence"]),
         ("payments", ["slug","alias","mode","evidence","enabled"]),
         ("cloudbeds", ["slug","external_property_id","alias","evidence","enabled"]),
+        ("native-booking", ["slug","evidence","enabled"]),
     ):
         p = sub.add_parser(name)
         for field in fields:
