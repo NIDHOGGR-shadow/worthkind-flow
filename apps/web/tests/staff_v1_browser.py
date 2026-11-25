@@ -3,6 +3,8 @@ These tests do not contact Supabase or establish a working hosted staff integrat
 The surrounding browser journey separately exercises real local API routes.
 """
 import json
+import os
+from pathlib import Path
 from urllib.parse import urlsplit
 from playwright.sync_api import expect
 
@@ -100,6 +102,11 @@ def check_staff_v1(browser, base):
                                             "priority": "high", "subject": "Synthetic maintenance issue",
                                             "description": "Test only", "due_at": "2026-11-25T12:00:00Z",
                                             "overdue": True, "assignee": None}]})
+        elif path == prefix + "/tickets/" + TICKET_ID and request.method == "GET":
+            route.fulfill(json={"id": TICKET_ID, "status": state["ticket"],
+                                "origin_case_id": CASE_ID, "history": [{"actor": MEMBER_ID,
+                                "action": "note", "note": "Synthetic history entry",
+                                "created_at": "2026-11-25T10:00:00Z"}]})
         elif path == prefix + "/tickets/" + TICKET_ID + "/transition":
             assert request.post_data_json["action"] == "claim"
             state["ticket"] = "assigned"
@@ -144,6 +151,8 @@ def check_staff_v1(browser, base):
     expect(page.locator("#v1-tickets")).to_contain_text("Overdue")
     page.get_by_role("button", name="Claim", exact=True).click()
     expect(page.locator("#v1-tickets")).to_contain_text("assigned")
+    page.get_by_role("button", name="Load ticket history").click()
+    expect(page.locator("#v1-tickets")).to_contain_text("Synthetic history entry")
     page.get_by_role("button", name="Memberships", exact=True).click()
     page.locator("#accept-membership").click()
     expect(page.locator("#membership-result")).to_contain_text("active")
@@ -178,6 +187,10 @@ def check_staff_v1(browser, base):
             page.set_viewport_size({"width": width, "height": 900})
             actual = page.evaluate("Math.max(document.documentElement.scrollWidth, document.body.scrollWidth)")
             assert actual <= width + 2, f"Staff {label}: overflow at {width}px ({actual}px)"
+            if width in (390, 1440) and os.getenv("WF_BROWSER_SCREENSHOT_DIR"):
+                output = Path(os.environ["WF_BROWSER_SCREENSHOT_DIR"])
+                output.mkdir(parents=True, exist_ok=True)
+                page.screenshot(path=str(output / ("staff-" + label.lower().replace(" ", "-") + "-" + str(width) + ".png")), full_page=True)
     page.locator("#staff-slug").fill("hotel-b")
     page.get_by_role("button", name="Select property").click()
     expect(page.locator("#v1-cases")).to_be_empty()
