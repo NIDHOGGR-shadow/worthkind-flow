@@ -47,3 +47,14 @@ test("denials and uncertain outcomes are surfaced rather than retried automatica
  let calls=0;const api=managementApi(async()=>{calls++;return {ok:false,status:503};},identity);
  await assert.rejects(api.procurement("hotel-a"));assert.equal(calls,1);
 });
+
+test("purchase batches reject duplicate items and verify atomic decision",async()=>{
+ const calls=[];const api=managementApi(async(u,o)=>{calls.push([u,o]);return ok(u.endsWith("/decision")?{id,action:"approve",line_count:2}:{id})},identity);
+ const body={supplier_id:id,currency:"NGN",request_key:"fixture-batch",lines:[{item_id:id,quantity:"1.500",unit_price_minor:200},{item_id:other,quantity:"2",unit_price_minor:300}]};
+ await api.batch("hotel-a",body);await api.batchDecision("hotel-a",id,"approve");await assert.rejects(api.batch("hotel-a",{...body,lines:[body.lines[0],body.lines[0]]}));assert.equal(calls.length,2);
+});
+test("consent policy version comes from published content, never a default",async()=>{
+ const calls=[];const api=managementApi(async(u,o)=>{calls.push([u,o]);return ok(o.method==="GET"?{content:[{key:"privacy-policy",version:3,content:{title:"Published policy",body:"Synthetic approved policy text"}}]}:{id,purpose:"marketing",granted:false})},identity);
+ const policy=await api.publishedPrivacyPolicy("hotel-a");assert.equal(policy.version,"privacy-policy:3");await api.consent(receipt,{purpose:"marketing",granted:false,policy_version:policy.version});assert.equal(calls[0][1].headers.Authorization,undefined);assert.equal(calls[1][1].headers["X-Receipt-Token"],receipt.token);
+ assert.equal(await managementApi(async()=>ok({content:[]})).publishedPrivacyPolicy("hotel-a"),null);
+});
