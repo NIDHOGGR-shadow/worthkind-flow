@@ -10,7 +10,7 @@ import secrets
 import sqlite3
 from uuid import UUID, uuid4
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request, Depends
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -20,6 +20,7 @@ from sla import install_sla_routes
 from delivery_contract import create_delivery_tables, install_delivery_routes
 from knowledge import create_knowledge_tables, install_knowledge_routes, identify_knowledge_key
 
+from guest_quota import enforce_guest_quota
 from guest_postgres import (
     submit_guest_enquiry, guest_case_status, GuestStorageNotConfigured,
     GuestRecordUnavailable, GuestRequestConflict, GuestStorageError,
@@ -450,7 +451,7 @@ class PostgreSQLGuestEnquiry(EnquiryInput):
     )
 
 
-@app.post("/api/v1/properties/{slug}/enquiries", status_code=201)
+@app.post("/api/v1/properties/{slug}/enquiries", status_code=201, dependencies=[Depends(enforce_guest_quota)])
 def postgres_guest_enquiry_v1(slug: str, data: PostgreSQLGuestEnquiry):
     """Development-only encrypted guest request; never a booked hotel room."""
     try:
@@ -465,7 +466,7 @@ def postgres_guest_enquiry_v1(slug: str, data: PostgreSQLGuestEnquiry):
         raise HTTPException(503, "Guest enquiry unavailable") from error
 
 
-@app.get("/api/v1/properties/{slug}/enquiries/{case_id}")
+@app.get("/api/v1/properties/{slug}/enquiries/{case_id}", dependencies=[Depends(enforce_guest_quota)])
 def postgres_guest_status_v1(
     slug: str, case_id: UUID, x_receipt_token: str | None = Header(None)
 ):
