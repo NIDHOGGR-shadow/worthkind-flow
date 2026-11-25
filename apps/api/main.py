@@ -559,3 +559,6 @@ install_pms_write_routes(app)
 
 from ai_gateway import install_ai_routes
 install_ai_routes(app)
+
+from ai_automation import install_ai_automation_routes
+install_ai_automation_routes(app)
