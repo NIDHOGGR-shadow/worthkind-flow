@@ -44,9 +44,11 @@
   }
   function showView(value){
     view=value;
+    el("staff-module-select").value=value;
     document.querySelectorAll("[data-panel]").forEach(n=>{n.hidden=n.id!==value+"-view";});
     document.querySelectorAll("[data-view]").forEach(n=>n.setAttribute("aria-pressed",String(n.dataset.view===value)));
   }
+  el("staff-module-select").addEventListener("change",e=>{if(!ctx.busy&&Array.from(document.querySelectorAll("[data-view]")).some(n=>n.dataset.view===e.target.value))showView(e.target.value);});
   function renderCases(){
     const root=el("v1-cases");root.replaceChildren();if(!cases)return;
     const filtered=cases.cases.filter(c=>!el("case-filter").value||c.status===el("case-filter").value);
