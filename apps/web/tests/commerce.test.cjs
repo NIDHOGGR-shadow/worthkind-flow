@@ -73,3 +73,11 @@ test("channel reservation lookup is read-only and page-bound",async()=>{
  assert.equal(d.reservations[0].state,"checked_in");assert.equal(calls[0][1].method,"GET");
  await assert.rejects(api.channels("hotel-a","2026-12-01","2026-12-03",1));
 });
+
+test("partial refund is keyed and invoice void verifies returned identity and state",async()=>{
+ const calls=[];const api=commerceApi(async(url,options)=>{calls.push([url,options]);return ok({id,state:url.endsWith("/void")?"voided":"requested"});},identity);
+ await api.requestRefund("hotel-a",id,"Synthetic reason",500,"refund-fixture-key");
+ assert.deepEqual(JSON.parse(calls[0][1].body),{payment_id:id,reason:"Synthetic reason",amount_minor:500,request_key:"refund-fixture-key"});
+ await assert.rejects(api.requestRefund("hotel-a",id,"Synthetic reason",0,"refund-fixture-key"));
+ await api.voidInvoice("hotel-a",id,"Synthetic void reason");assert.equal(calls.length,2);
+});
