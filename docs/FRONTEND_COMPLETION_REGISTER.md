@@ -52,7 +52,7 @@ Q2 status: all currently available scoped staff API contracts implemented in sou
 - [x] Expanded commerce tests and 108 browser layout checks passed in GitHub Actions run 45700060628 (62/62 JavaScript tests).
 - [x] Expanded Q3 browser acceptance passed on the earlier revision. Full visual inspection and newest native-stay/provider browser coverage remain open.
 - [x] Native inventory holds, pay-at-property confirmation, date changes, cancellation, bookable rates, stay transitions, folios and stay invoices connected to versioned contracts. Cloudbeds reservation creation/cancellation/checkout-date and rate commands connected, with explicit authorization and no automatic retry of ambiguous writes.
-- [ ] Guest dining order API and persistent guest venue tracking still absent. Partial refunds and invoice voiding are available backend contracts but not yet connected to the frontend. Hosted booking/provider acceptance and final visual review remain open.
+- [ ] Guest dining order API and persistent guest venue tracking still absent. Keyed partial/full refund requests and unpaid invoice voiding are now connected; newest tests remain pending. Hosted booking/provider acceptance and final visual review remain open.
 - [ ] Real identity, deployed gateway, authorized PMS/Paystack activation and hosted property acceptance. No live provider operation is claimed.
 Q3 status: expanded implementation and prior automated verification complete for the recorded scope, with the remaining UI and hosted acceptance gaps explicitly open. Source support does not equal provider activation.
 
@@ -67,10 +67,10 @@ Q3 status: expanded implementation and prior automated verification complete for
 - [x] Native stay controls and folios integrated for newly available Q3 contracts.
 - [x] Property/session data cleanup, exact gateway allowlist and no automatic repeats of ambiguous PMS writes.
 - [x] CI run 45714203571 passed 81/81 JavaScript tests and 138 browser geometry checks (96 staff modules, 36 routes, six guest commerce widths); this is evidence for that revision, not the latest commit.
-- [x] Current source: 9 management, 7 native booking and 5 provider evidence tests passed in an isolated JavaScript harness. New Chromium fixture cases for native folio, batches, provider evidence and policy consent authored.
+- [x] Current source: 9 management, 7 native booking and 5 provider evidence tests passed in an isolated JavaScript harness. New Chromium fixture cases for native folio, batches, provider evidence and policy consent authored. Keyed partial/full refund requests and unpaid invoice voiding added with a contract test.
 - [ ] Final CI on the new revision and full screenshot/visual/accessibility review. Automated width checks do not substitute for this.
 - [ ] AI Studio, live voice/telephony, automated CRM campaigns/advertising, platform tenant administration/subscription billing, complete analytics and audit dashboards need versioned backend contracts. No fake controls introduced.
-- [ ] Staff private document storage UI, partial refunds and invoice voiding remain unconnected. Identity recovery/MFA, dedicated shift handover, guest-confirmed resolution and historical vacancy draft listing remain open.
+- [ ] Staff private document storage UI remains unconnected; binary gateway exposure and malware-handling policy require review. Identity recovery/MFA, dedicated shift handover, guest-confirmed resolution and historical vacancy draft listing remain open.
 - [ ] Hosted frontend gateway, approved identity project, property isolation tests, provider activation, live acceptance and integration with backend PR #3. Do not mark a live deployment without verification.
 
 Q4 status: implemented and tested substantial property management and provider integration scope. Full release is not complete. PR #2 remains draft; all outstanding work is tracked here.
