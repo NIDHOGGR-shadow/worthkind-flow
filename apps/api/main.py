@@ -526,3 +526,6 @@ install_dining_routes(app)
 
 from staff_operations_pg import install_staff_operations
 install_staff_operations(app)
+
+from guest_records_pg import install_guest_records
+install_guest_records(app)
