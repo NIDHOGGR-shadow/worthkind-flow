@@ -1219,3 +1219,64 @@ def test_partial_refund_balance_reservation_in_disposable_db(pg, oidc_rig, monke
     report=client.get(base+"/finance",headers=owner).json()
     assert report["invoices"][0]["state"]=="test_verified"
     assert sum(x["amount_minor"] for x in report["refunds"])==10000
+
+
+def test_stay_arrival_checkout_and_folio(pg, oidc_rig, monkeypatch):
+    from datetime import timedelta
+    client,key,source=oidc_rig
+    monkeypatch.setenv("WF_OPERATIONS_POSTGRES_DSN",os.environ["WF_STAFF_POSTGRES_DSN"])
+    owner=auth_header(signed_token(key,"idp:hotel-a-owner"))
+    outsider=auth_header(signed_token(key,"idp:hotel-b-reception"))
+    slug="hotel-a"
+    subject="idp:hotel-a-owner"
+    base="/api/v1/properties/"+slug+"/staff/native-bookings/"
+    today=pg.execute("SELECT (now() AT TIME ZONE time_zone)::date FROM worthkind_flow.properties WHERE slug=%s",(slug,)).fetchone()[0]
+    typ=pg.execute("SELECT id FROM worthkind_flow.manage_room_type(%s,%s,'stay','Stay room','',2,true,0)",(subject,slug)).fetchone()[0]
+    room=pg.execute("SELECT worthkind_flow.create_room(%s,%s,%s,'stay-101')",(subject,slug,typ)).fetchone()[0]
+    pg.execute("SELECT worthkind_flow.change_room_state(%s,%s,%s,'clean',1)",(subject,slug,room))
+    pg.execute("SELECT worthkind_flow.configure_native_bookings(%s,'disposable inventory proof',true)",(slug,))
+    rate=pg.execute("SELECT id FROM worthkind_flow.save_bookable_rate(%s,%s,%s,'flex','NGN',2000000,%s,%s,'disposable pay at property',true,0)",(subject,slug,typ,today,today+timedelta(days=30))).fetchone()[0]
+    cid=pg.execute("SELECT case_id FROM worthkind_flow.create_guest_case(%s,'stay-case-001',repeat('a',64),repeat('b',64),'booking')",(slug,)).fetchone()[0]
+    intent=pg.execute("SELECT id FROM worthkind_flow.request_reservation(%s,%s,repeat('b',64),%s,%s,%s,2,0,1,'stay-intent-001')",(slug,cid,typ,today,today+timedelta(days=2))).fetchone()[0]
+    pg.execute("SELECT worthkind_flow.review_reservation_intent(%s,%s,%s,'review')",(subject,slug,intent))
+    hold=pg.execute("SELECT worthkind_flow.hold_native_booking(%s,%s,%s,%s,%s,'stay-hold-001')",(subject,slug,intent,typ,rate)).fetchone()[0]
+    booking=hold["id"]
+    pg.execute("SELECT worthkind_flow.confirm_native_booking(%s,%s,repeat('b',64),%s,4000000)",(slug,cid,booking))
+    route=base+booking
+    assert client.post(route+"/stay",json={"action":"check_in","revision":0},headers=outsider).status_code==403
+    r=client.post(route+"/stay",json={"action":"check_in","revision":0},headers=owner)
+    assert r.status_code==200,r.text
+    assert r.json()["stay"]["state"]=="checked_in"
+    assert pg.execute("SELECT count(*) FROM worthkind_flow.occupied_rooms WHERE room_id=%s",(room,)).fetchone()[0]==1
+    assert client.post(route+"/cancel",json={"revision":2,"reason":"Disposable cancellation"},headers=owner).status_code==409
+    r=client.post(route+"/stay",json={"action":"check_out","revision":1,"note":"Guest departed normally"},headers=owner)
+    assert r.status_code==200,r.text
+    assert r.json()["stay"]["state"]=="checked_out"
+    assert pg.execute("SELECT operational_state FROM worthkind_flow.hotel_rooms WHERE id=%s",(room,)).fetchone()[0]=="dirty"
+    assert pg.execute("SELECT count(*) FROM worthkind_flow.occupied_rooms WHERE room_id=%s",(room,)).fetchone()[0]==0
+    assert client.get(route+"/folio",headers=owner).json()["stay"]["state"]=="checked_out"
+
+
+def test_pms_command_replay_and_intent_guard(pg, seeded):
+    from datetime import timedelta
+    subject="idp:hotel-a-owner"
+    slug="hotel-a"
+    today=pg.execute("SELECT current_date").fetchone()[0]
+    typ=pg.execute("SELECT id FROM worthkind_flow.manage_room_type(%s,%s,'pms','PMS room','',2,true,0)",(subject,slug)).fetchone()[0]
+    pg.execute("SELECT worthkind_flow.configure_cloudbeds(%s,'property-ci','account-ci','disposable PMS configuration',true)",(slug,))
+    cid=pg.execute("SELECT case_id FROM worthkind_flow.create_guest_case(%s,'pms-case-001',repeat('a',64),repeat('b',64),'booking')",(slug,)).fetchone()[0]
+    intent=pg.execute("SELECT id FROM worthkind_flow.request_reservation(%s,%s,repeat('b',64),%s,%s,%s,2,0,1,'pms-intent-001')",(slug,cid,typ,today+timedelta(days=3),today+timedelta(days=5))).fetchone()[0]
+    pg.execute("SELECT worthkind_flow.review_reservation_intent(%s,%s,%s,'review')",(subject,slug,intent))
+    args=(subject,slug,intent)
+    q="SELECT worthkind_flow.begin_pms_command(%s,%s,'create','pms-command-001',repeat('a',64),%s,NULL)"
+    first=pg.execute(q,args).fetchone()[0]
+    assert first["submit"] is True
+    assert pg.execute(q,args).fetchone()[0]["submit"] is False
+    with pytest.raises(errors.CheckViolation):
+        pg.execute("SELECT worthkind_flow.withdraw_reservation(%s,%s,repeat('b',64),%s)",(slug,cid,intent))
+    with pytest.raises(errors.UniqueViolation):
+        pg.execute("SELECT worthkind_flow.begin_pms_command(%s,%s,'create','pms-command-002',repeat('a',64),%s,NULL)",args)
+    with pytest.raises(errors.InsufficientPrivilege):
+        pg.execute(q,("idp:hotel-b-reception",slug,intent))
+    assert pg.execute("SELECT worthkind_flow.finish_pms_command(%s,%s,%s,'unknown',NULL,NULL,'{}'::jsonb)",(subject,slug,first["id"])).fetchone()[0]["state"]=="unknown"
+    assert pg.execute(q,args).fetchone()[0]["submit"] is False
