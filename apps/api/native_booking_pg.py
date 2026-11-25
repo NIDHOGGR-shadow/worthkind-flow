@@ -6,7 +6,7 @@ from fastapi import Header,Depends,HTTPException
 from pydantic import BaseModel,Field,StrictBool
 from guest_quota import enforce_guest_quota
 from guest_records_pg import proof
-from operations_pg import actor,command
+from operations_pg import actor,command,encrypt
 
 class BookableRate(BaseModel):
     room_type_id:UUID
@@ -43,6 +43,11 @@ class Change(BaseModel):
 class Cancel(BaseModel):
     revision:int=Field(ge=1)
     reason:str=Field(min_length=8,max_length=240)
+
+class StayTransition(BaseModel):
+    action:Literal["check_in","check_out","no_show"]
+    revision:int=Field(ge=0)
+    note:str|None=Field(default=None,min_length=8,max_length=1500)
 
 def install_native_booking_routes(app):
     base="/api/v1/properties/{slug}"
@@ -96,3 +101,15 @@ def install_native_booking_routes(app):
         r=command("SELECT worthkind_flow.change_native_booking(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
         (slug,case_id,proof(x_receipt_token),booking_id,body.revision,body.arrival,body.departure,body.rate_id,body.expected_total_minor,body.expected_currency,body.policy_reference),guest=True)[0]
         return {"booking":r,"source":"native_inventory","payment_method":"pay_at_property"}
+
+
+    @app.post(staff+"/{booking_id}/stay")
+    def transition_stay(slug:str,booking_id:UUID,body:StayTransition,authorization:str|None=Header(None)):
+        subject=actor(authorization)
+        note=encrypt({"note":body.note},f"wf:stay:{slug}:{booking_id}") if body.note else None
+        return {"stay":command("SELECT worthkind_flow.transition_native_stay(%s,%s,%s,%s,%s,%s)",
+        (subject,slug,booking_id,body.action,body.revision,note))[0]}
+
+    @app.get(staff+"/{booking_id}/folio")
+    def folio(slug:str,booking_id:UUID,authorization:str|None=Header(None)):
+        return command("SELECT worthkind_flow.native_stay_folio(%s,%s,%s)",(actor(authorization),slug,booking_id))[0]
