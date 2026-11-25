@@ -553,3 +553,6 @@ install_pos_routes(app)
 
 from cloudbeds_pg import install_pms_evidence_routes
 install_pms_evidence_routes(app)
+
+from cloudbeds_write_pg import install_pms_write_routes
+install_pms_write_routes(app)
