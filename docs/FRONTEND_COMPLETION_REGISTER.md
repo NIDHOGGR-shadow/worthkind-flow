@@ -23,7 +23,7 @@ Q1 status: source implementation and prior automated browser checks passed; visu
 - [x] Hotel selection, server-authorized reception queue, claim and reply.
 - [x] Membership invite, accept and revoke for existing provider identities.
 - [x] Hotel settings read/update with optimistic revision control.
-- [x] Department tickets, category/priority, overdue display, case linkage, retry and transitions.
+- [x] Department tickets, category/priority, overdue display, case linkage, retry and transitions; ticket detail/history now connected to backend's versioned read contract.
 - [x] Responsive layouts, filters, text-only private record rendering and property/session cleanup.
 - [x] Staff roster and employee profile updates using the schedule/profile contracts on backend PR #3.
 - [x] Shift scheduling, date-range selection and cancellation using backend PR #3.
@@ -32,12 +32,12 @@ Q1 status: source implementation and prior automated browser checks passed; visu
 - [x] Ten staff and seven guest contract tests passed using fetched committed source in isolated JS harnesses; new UI syntax and static ID checks passed.
 - [x] Previous full Chromium suite passed in GitHub Actions run 45694066700 (36 route-width and 24 staff fixture layout checks).
 - [x] Extend browser fixtures for schedule, escalation and room operations; 36 authenticated staff module-width checks now authored.
-- [ ] Run and verify the expanded Chromium suite on the current revision and perform visual inspection.
+- [ ] Expanded Chromium suite passed in run 45695602215 (72 layout checks). Subsequent gateway HTTP tests and Chromium suite passed in run 45696044082; ticket-history browser coverage and screenshot capture were added after that baseline and still require final CI/visual inspection.
 - [ ] Configure an approved identity project and test real staff identities, roles and session lifecycle against authorized hosted PostgreSQL. OIDC interactive login, MFA and recovery remain outside this implementation.
-- [ ] Verify same-origin API routing and frontend hosting without weakening the staging guard.
+- [ ] Same-origin frontend gateway and nonroot container implemented; real loopback HTTP tests passed in run 45696044082 (versioned route allowlist, no legacy exposure, no forwarded client secrets/cookies, redirect/HTML denial). Hosted deployment and upstream rate-limit topology still require verification. See docs/FRONTEND_DEPLOYMENT.md.
 - [ ] Connect dedicated shift handover and guest-confirmed resolution when their backend contracts exist. Neither a ticket note nor a staff resolve command substitutes for them.
 
-Q2 status: 14 of 18 checklist items implemented or evidenced (78% by equal checklist count, not engineering effort). Hosted acceptance and the remaining missing contracts prevent closing Q2. API source contracts are on the unmerged backend branch; frontend fixtures are not proof of live integrations.
+Q2 status: all currently available scoped staff API contracts implemented in source, including newly added ticket history. Four checklist gates remain open (two partially satisfied by passing automated browser/gateway tests). Backend PR #3 remains a separate integration dependency; dedicated handover, guest-confirmed case resolution, hosted identity and deployment are not claimed. Do not count fixture tests as proof of live integrations.
 
 ## Q3 — Reservations, guest stay and commerce
 - [ ] Hotel discovery, approved property content and room inventory.
