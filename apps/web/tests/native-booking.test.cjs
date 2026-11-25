@@ -42,3 +42,13 @@ test("cancellation is authorized and server-verified",async()=>{
  const api=nativeBookingApi(async()=>ok({...b,state:"cancelled",revision:2}),identity);assert.equal((await api.cancel("hotel-a",b,"Guest requested cancellation")).state,"cancelled");
  await assert.rejects(api.cancel("hotel-a",b,"short"));await assert.rejects(api.cancel("hotel-a",{...b,state:"expired"},"Guest requested cancellation"));
 });
+
+test("native stay transition requires checkout note and verifies revision",async()=>{
+ const calls=[];const api=nativeBookingApi(async(u,o)=>{calls.push([u,o]);return ok({stay:{booking_id:id,state:"checked_out",revision:2}})},identity);
+ await assert.rejects(api.stay("hotel-a",id,"check_out",1,null));const stay=await api.stay("hotel-a",id,"check_out",1,"Guest returned room key");assert.equal(stay.state,"checked_out");assert.equal(calls.length,1);assert.equal(JSON.parse(calls[0][1].body).revision,1);
+});
+test("folio makes excluded charges and actual live verified amount explicit",async()=>{
+ const f={booking_id:id,booking_state:"confirmed",arrival:b.arrival,departure:b.departure,currency:"NGN",contract_total_minor:b.total_minor,rooms:[],stay:null,invoice:null,unlinked_service_charges_excluded:true};
+ const api=nativeBookingApi(async()=>ok(f),identity);assert.equal((await api.folio("hotel-a",id)).unlinked_service_charges_excluded,true);
+ await assert.rejects(nativeBookingApi(async()=>ok({...f,unlinked_service_charges_excluded:false}),identity).folio("hotel-a",id));
+});
