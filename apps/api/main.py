@@ -544,3 +544,6 @@ install_pms_routes(app)
 
 from operations_pg import install_reception_controls
 install_reception_controls(app)
+
+from native_booking_pg import install_native_booking_routes
+install_native_booking_routes(app)
