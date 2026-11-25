@@ -27,13 +27,29 @@ def check_guest_commerce(browser, base):
             route.fulfill(json={"items":[{"id":ROOM,"name":"Synthetic meal","price_minor":250000,"currency":"NGN"}]})
         elif path == prefix + "/venues":
             route.fulfill(json={"venues":[{"id":VENUE,"name":"Synthetic hall","capacity":50}]})
+        elif path == prefix + "/vacancies":
+            route.fulfill(json={"vacancies":[{"id":VENUE,"title":"Synthetic vacancy","description":"Published fixture vacancy","deadline":"2026-12-01"}]})
         elif path == prefix + "/enquiries" and req.method == "POST":
             state["token"] = req.post_data_json["receipt_token"]
             route.fulfill(json={"case_id":CASE,"receipt_token":state["token"],"status":"queued"})
         elif path.startswith(private):
             assert req.headers.get("x-receipt-token") == state["token"]
             assert state["token"] not in req.url
-            if path == private + "/reservation-intents" and req.method == "GET":
+            if path == private + "/preferences":
+                if req.method == "PUT":
+                    assert req.post_data_json["revision"] == 0
+                    assert req.post_data_json["language"] == "English"
+                    route.fulfill(json={"revision":1})
+                else:
+                    route.fulfill(json={"preferences":None,"revision":0})
+            elif path == private + "/feedback":
+                assert req.post_data_json["rating"] == 4
+                route.fulfill(json={"id":INTENT,"state":"new"})
+            elif path == private + "/applications":
+                assert req.post_data_json["consent"] is True
+                assert req.post_data_json["vacancy_id"] == VENUE
+                route.fulfill(json={"id":INTENT,"state":"submitted"})
+            elif path == private + "/reservation-intents" and req.method == "GET":
                 route.fulfill(json={"intents":[state["intent"]] if state["intent"] else [],"booking_confirmed":False,"inventory_held":False})
             elif path == private + "/reservation-intents" and req.method == "POST":
                 body = req.post_data_json
@@ -87,13 +103,32 @@ def check_guest_commerce(browser, base):
     page.locator("#venue-attendance").fill("20")
     page.locator("#venue-send").click()
     expect(page.locator("#guest-venue-requests")).to_contain_text(VENUE)
+    page.locator("#load-preferences").click()
+    expect(page.locator("#preferences-form")).to_be_visible()
+    page.locator("#guest-language").fill("English")
+    page.get_by_role("button", name="Save preferences").click()
+    expect(page.locator("#guest-records-message")).to_contain_text("Revision 1")
+    page.locator("#guest-rating").select_option("4")
+    page.locator("#guest-feedback-comment").fill("Synthetic feedback")
+    page.get_by_role("button", name="Submit feedback").click()
+    expect(page.locator("#guest-records-message")).to_contain_text("recorded by server")
+    expect(page.get_by_role("button", name="Submit feedback")).to_be_disabled()
+    page.locator("#load-application-vacancies").click()
+    page.locator("#application-vacancy").select_option(VENUE)
+    page.locator("#application-statement").fill("Synthetic application statement")
+    page.locator("#application-consent").check()
+    page.get_by_role("button", name="Submit application").click()
+    expect(page.locator("#application-receipt")).to_contain_text("submitted")
+    expect(page.get_by_role("button", name="Submit application")).to_be_disabled()
     for width in (320,360,390,768,1024,1440):
         page.set_viewport_size({"width":width,"height":900})
         actual = page.evaluate("Math.max(document.documentElement.scrollWidth, document.body.scrollWidth)")
         assert actual <= width + 2, f"Guest commerce overflow at {width}px ({actual}px)"
     page.locator("#v1-new").click()
     expect(page.locator("#guest-commerce")).to_be_hidden()
+    expect(page.locator("#guest-records")).to_be_hidden()
+    expect(page.locator("#application-receipt")).to_be_empty()
     expect(page.locator("#guest-intents")).to_be_empty()
     expect(page.locator("#guest-venue-requests")).to_be_empty()
     page.close()
-    print("PASS: guest commerce catalog, receipt-scoped stay retry, withdrawal, venue request, and six viewport checks")
+    print("PASS: guest commerce catalog, receipt-scoped stay retry, withdrawal, venue request, preferences, feedback, application, and six viewport checks")
