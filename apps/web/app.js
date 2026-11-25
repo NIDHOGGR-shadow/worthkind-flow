@@ -5,6 +5,9 @@ let receipt=null;
 let currentCase=null;
 let pendingRequest=null;
 let isSubmitting=false;
+let routingGeneration=0;
+let statusGeneration=0;
+let recoveryGeneration=0;
 function freshRequest(base,slug){
   // Reuse both secrets for unchanged retries so a lost network response
   // cannot create a second case or strand the guest without a receipt.
@@ -17,24 +20,34 @@ function freshRequest(base,slug){
   return {...base,request_key:pendingRequest.request_key,receipt_token:pendingRequest.receipt_token};
 }
 function setStatus(el,text){el.textContent=text;}
-function choose(kind){qs("#category").value=kind;qs("#new-request").scrollIntoView({behavior:"smooth"});}
+function choose(kind){qs("#category").value=kind;qs("#new-request").scrollIntoView({behavior:"auto"});}
 for(const btn of document.querySelectorAll("[data-kind]"))btn.addEventListener("click",()=>choose(btn.dataset.kind));
 qs("#human-bypass").addEventListener("click",()=>choose("human"));
 qs("#check-intent").addEventListener("click",async()=>{
   const text=qs("#question").value.trim(),slug=qs("#hotel").value;
+  const generation=++routingGeneration;
+  const isCurrent=()=>generation===routingGeneration&&qs("#hotel").value===slug&&qs("#question").value.trim()===text;
   if(!text){setStatus(qs("#routing-result"),"Enter a question first.");return;}
+  setStatus(qs("#routing-result"),"Checking hotel information…");
   try{
     const response=await fetch(`/api/properties/${encodeURIComponent(slug)}/route`,{
       method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text})
     });
     if(!response.ok)throw new Error("Routing unavailable");
     const result=await response.json();
+    if(!isCurrent())return;
+    if(result.intent==="urgent"){
+      qs("#category").value="human";
+      setStatus(qs("#routing-result"),"If there is immediate danger, contact local emergency services or hotel staff directly. This enquiry form is not an emergency dispatch service.");
+      return;
+    }
     if(result.intent==="information"){
       const infoResponse=await fetch("/api/properties/"+encodeURIComponent(slug)+"/information",{
         method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({question:text})
       });
       if(!infoResponse.ok)throw new Error("Hotel information unavailable");
       const info=await infoResponse.json();
+      if(!isCurrent())return;
       setStatus(qs("#routing-result"),info.status==="answered"
         ? info.answer+" (Synthetic demo source; no external AI used.)"
         : "There is no verified answer. Please use the human enquiry form.");
@@ -43,11 +56,12 @@ qs("#check-intent").addEventListener("click",async()=>{
     }
     const kinds=new Set(["human","booking","food","careers","supplier","events"]);
     if(kinds.has(result.intent))qs("#category").value=result.intent;
-  }catch(err){setStatus(qs("#routing-result"),"Unable to route right now. Use the direct enquiry form or call hotel staff.");}
+  }catch(err){if(isCurrent())setStatus(qs("#routing-result"),"Unable to route right now. Use the direct enquiry form or contact hotel staff separately.");}
 });
 qs("#enquiry-form").addEventListener("submit",async(event)=>{
   event.preventDefault();
   if(isSubmitting)return;
+  ++recoveryGeneration;
   const out=qs("#submission-result");
   const slug=qs("#hotel").value;
   let payload;
@@ -67,11 +81,13 @@ qs("#enquiry-form").addEventListener("submit",async(event)=>{
     });
     const result=await response.json();
     if(!response.ok)throw new Error(result.detail||"Unable to submit");
-    receipt=result.receipt_token || pendingRequest.receipt_token;
+    if(typeof result.case_id!=="string" || !result.case_id || !["queued","claimed","responded"].includes(result.status))throw new Error("Unexpected enquiry response");
+    ++statusGeneration;
+    receipt=result.receipt_token || payload.receipt_token;
     currentCase={id:result.case_id,slug};
     setStatus(out,result.message);
     qs("#track").hidden=false;
-    setStatus(qs("#receipt"),`Case ID: ${result.case_id}. Receipt token (keep private): ${receipt}`);
+    setStatus(qs("#receipt"),`Hotel: ${slug}\nCase ID: ${result.case_id}\nPrivate receipt token (keep private): ${receipt}`);
     setStatus(qs("#case-status"),`Status: ${result.status}. ${result.status==="queued"?"No staff has accepted it yet.":"Refresh to check the latest local response."}`);
     qs("#track").scrollIntoView({behavior:"smooth"});
   }catch(err){
@@ -83,17 +99,23 @@ qs("#enquiry-form").addEventListener("submit",async(event)=>{
 });
 qs("#refresh").addEventListener("click",async()=>{
   if(!currentCase||!receipt)return;
+  const active=currentCase, token=receipt, generation=++statusGeneration;
+  const isCurrent=()=>generation===statusGeneration&&currentCase===active&&receipt===token;
+  setStatus(qs("#case-status"),"Checking request status…");
   try{
-    const response=await fetch(`/api/properties/${currentCase.slug}/enquiries/${currentCase.id}`,{
-      headers:{"X-Receipt-Token":receipt},cache:"no-store"
+    const response=await fetch(`/api/properties/${encodeURIComponent(active.slug)}/enquiries/${encodeURIComponent(active.id)}`,{
+      headers:{"X-Receipt-Token":token},cache:"no-store"
     });
     if(!response.ok)throw new Error("Could not check status");
     const result=await response.json();
+    if(!isCurrent())return;
+    if(result.case_id!==active.id||!["queued","claimed","responded"].includes(result.status))throw new Error("Unexpected request status");
     setStatus(qs("#case-status"),`Status: ${result.status}. ${result.staff_reply||"No staff response yet."}`);
-  }catch(err){setStatus(qs("#case-status"),"Status unavailable. Try again or contact the hotel.");}
+  }catch(err){if(isCurrent())setStatus(qs("#case-status"),"Status unavailable. Try again or contact the hotel.");}
 });
 
 function renderCheckedReceipt(id,slug,token,status,reply){
+  ++statusGeneration;
   currentCase={id,slug};
   receipt=token;
   qs("#track").hidden=false;
@@ -114,6 +136,8 @@ qs("#recover-form").addEventListener("submit",async(event)=>{
     return;
   }
   const button=qs("#recover-submit");
+  if(button.disabled||isSubmitting)return;
+  const generation=++recoveryGeneration;
   button.disabled=true;
   setStatus(output,"Verifying your private receipt...");
   try{
@@ -123,7 +147,8 @@ qs("#recover-form").addEventListener("submit",async(event)=>{
     );
     if(!response.ok)throw new Error("Receipt could not be verified.");
     const result=await response.json();
-    if(result.case_id!==id || typeof result.status!=="string"){
+    if(generation!==recoveryGeneration)return;
+    if(result.case_id!==id || !["queued","claimed","responded"].includes(result.status)){
       throw new Error("Unexpected response from the local server.");
     }
     setStatus(output,"Receipt verified locally. This does not mean a hotel has been contacted.");
@@ -132,7 +157,7 @@ qs("#recover-form").addEventListener("submit",async(event)=>{
     renderCheckedReceipt(id,slug,token,result.status,result.staff_reply);
   }catch(error){
     // Do not disclose whether an ID exists independently of its secret token.
-    setStatus(output,"Could not verify this receipt. Check the hotel, case ID and token, then retry.");
+    if(generation===recoveryGeneration)setStatus(output,"Could not verify this receipt. Check the hotel, case ID and token, then retry.");
   }finally{
     button.disabled=false;
   }
@@ -163,6 +188,10 @@ qs("#copy-receipt").addEventListener("click",async()=>{
 });
 
 qs("#new-enquiry").addEventListener("click",()=>{
+  if(isSubmitting){setStatus(qs("#case-status"),"Wait for the current submission to finish before starting a new request.");return;}
+  ++statusGeneration;
+  ++recoveryGeneration;
+  ++routingGeneration;
   pendingRequest=null;
   receipt=null;
   currentCase=null;
@@ -173,3 +202,6 @@ qs("#new-enquiry").addEventListener("click",()=>{
   setStatus(qs("#recover-result"),"No previous enquiry checked.");
   qs("#new-request").scrollIntoView({behavior:"smooth"});
 });
+
+qs("#hotel").addEventListener("change",()=>{++routingGeneration;setStatus(qs("#routing-result"),"Hotel changed. Check your question for this hotel.");});
+qs("#question").addEventListener("input",()=>{++routingGeneration;setStatus(qs("#routing-result"),"Check your question when ready.");});
