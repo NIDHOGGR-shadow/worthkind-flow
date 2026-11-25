@@ -68,11 +68,15 @@ Q3 status: expanded implementation and prior automated verification complete for
 - [x] Property/session data cleanup, exact gateway allowlist and no automatic repeats of ambiguous PMS writes.
 - [x] CI run 45714203571 passed 81/81 JavaScript tests and 138 browser geometry checks (96 staff modules, 36 routes, six guest commerce widths); this is evidence for that revision, not the latest commit.
 - [x] Current source: 9 management, 7 native booking and 5 provider evidence tests passed in an isolated JavaScript harness. New Chromium fixture cases for native folio, batches, provider evidence and policy consent authored. Keyed partial/full refund requests and unpaid invoice voiding added with a contract test.
-- [ ] Final CI on the new revision and full screenshot/visual/accessibility review. Automated width checks do not substitute for this.
-- [ ] AI Studio, live voice/telephony, automated CRM campaigns/advertising, platform tenant administration/subscription billing, complete analytics and audit dashboards need versioned backend contracts. No fake controls introduced.
-- [ ] Staff private document storage UI remains unconnected; binary gateway exposure and malware-handling policy require review. Identity recovery/MFA, dedicated shift handover, guest-confirmed resolution and historical vacancy draft listing remain open.
+- [x] CI run 45714740609 passed 84/84 tests and 150 responsive layout checks; run 45715621512 passed 90/90 tests and 162 layout checks after AI/document integration.
+- [x] Reviewed 36 staff CI screenshots (18 modules at 390 and 1440). Found excessive navigation footprint and poor desktop width utilization. Implemented grouped desktop sidebar and compact mobile selector.
+- [ ] Latest layout revision browser verification and visual review; full accessibility and guest screen review remain open.
+- [x] AI Studio owner policy load/save with revision checks, exact approved source permission commands, optional guest and staff assistant, approved excerpts/source references and human enquiry fallback integrated with new AI gateway. Voice and alert policy flags do not establish operational voice or autonomous alerts.
+- [ ] Actual Modal model activation and live AI acceptance, source-permission listing and AI audit/usage views. Live voice/telephony, automated CRM campaigns/advertising, platform tenant administration/subscription billing and complete analytics still require backend contracts.
+- [x] Owner/manager document upload and retrieval by exact ID, 2 MB limit, binary-only gateway, attachment-only download, temporary object URL revocation on property/session reset. Default-off gateway flag WF_FRONTEND_DOCUMENTS_ENABLED=1 requires approved document handling policy and storage acceptance. No scan, listing or deletion API is claimed.
+- [ ] Document malware screening, listing/deletion and hosted acceptance; identity recovery/MFA, dedicated shift handover, guest-confirmed resolution and historical vacancy draft listing remain open.
 - [ ] Hosted frontend gateway, approved identity project, property isolation tests, provider activation, live acceptance and integration with backend PR #3. Do not mark a live deployment without verification.
 
-Q4 status: implemented and tested substantial property management and provider integration scope. Full release is not complete. PR #2 remains draft; all outstanding work is tracked here.
+Q4 status: property management, provider integration, available AI policy/assistant and private document workflows implemented and fixture-tested. Full release remains open. PR #2 remains draft; live provider and hosted acceptance are unverified.
 
 Do not represent missing API contracts, provider activation or unexecuted tests as finished functionality. The existing development paths are not production identities or hotel connections.
