@@ -30,6 +30,7 @@ from staff_oidc import (
     StaffAuthConfigurationError, StaffPermissionDenied, StaffStorageUnavailable,
 )
 
+from staging_runtime import staging_ready
 from runtime_boundary import StaffConfigurationError, sqlite_ready, staff_key_matches, validate_environment
 
 APP_ENV = validate_environment(os.getenv("WF_ENV", "development"))
@@ -42,8 +43,10 @@ async def protect_private_api_responses(request, call_next):
     This is defense in depth for the development prototype, not a substitute
     for production staff identities, authorization, or HTTPS.
     """
-    response = await call_next(request)
     path = request.url.path
+    if APP_ENV == "staging" and not (path.startswith("/api/v1/") or path in ("/health", "/ready")):
+        return JSONResponse(status_code=404, content={"detail":"Not found"}, headers={"Cache-Control":"no-store"})
+    response = await call_next(request)
     if path.startswith("/api/") or path in ("/health", "/ready"):
         response.headers["Cache-Control"] = "no-store"
         response.headers["Pragma"] = "no-cache"
@@ -155,7 +158,8 @@ def record_event(conn, property_key: str, case_id: str, actor: str, action: str)
 
 @app.on_event("startup")
 def startup():
-    initialize()
+    if APP_ENV != "staging":
+        initialize()
 
 
 @app.get("/")
@@ -185,15 +189,15 @@ def staff_knowledge_page():
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "stage": "p0-dev-only", "live_bookings": False, "live_payments": False}
+    return {"status": "ok", "stage": "postgres-staging" if APP_ENV == "staging" else "p0-dev-only", "live_bookings": False, "live_payments": False}
 
 
 @app.get("/ready", include_in_schema=False)
 def ready():
-    available = sqlite_ready(os.getenv("WF_DATABASE_PATH", "./worthkind-flow-dev.sqlite3"))
+    available = staging_ready() if APP_ENV == "staging" else sqlite_ready(os.getenv("WF_DATABASE_PATH", "./worthkind-flow-dev.sqlite3"))
     return JSONResponse(status_code=200 if available else 503, content={
         "status": "ready" if available else "not_ready",
-        "stage": "p0-dev-only", "production_ready": False,
+        "stage": "postgres-staging" if APP_ENV == "staging" else "p0-dev-only", "production_ready": False,
     })
 
 
