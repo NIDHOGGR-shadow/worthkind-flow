@@ -13,6 +13,8 @@ ROLE_CONNECTIONS = (
     ("WF_GUEST_QUOTA_POSTGRES_DSN", "wf_guest_quota"),
     ("WF_PROPERTY_CONFIG_POSTGRES_DSN", "wf_property_config"),
     ("WF_DOCUMENT_POSTGRES_DSN", "wf_document_store"),
+    ("WF_OPERATIONS_POSTGRES_DSN", "wf_operations"),
+    ("WF_PUBLIC_CONTENT_POSTGRES_DSN", "wf_public_content"),
 )
 
 
