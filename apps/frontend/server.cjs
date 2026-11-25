@@ -23,7 +23,7 @@ const allowed=[
  ["GET","/staff/pms/availability"],["GET","/staff/pms/channel-reservations"],["PUT","/staff/room-types"],["POST","/staff/rooms"],["PUT","/staff/display-rates"],["PUT","/staff/menu"],["POST","/staff/venues"],["GET","/staff/pms/reservations/[A-Za-z0-9_-]{1,100}"],
  ["GET","/staff/dining/orders"],["POST","/staff/dining/orders"],["POST","/staff/dining/orders/"+UUID+"/transition"],
  ["GET","/staff/venue-requests"],["POST","/staff/venue-requests/"+UUID+"/decision"],
- ["GET","/staff/finance"],["POST","/staff/finance/invoices"],["POST","/staff/finance/invoices/"+UUID+"/checkout"],["POST","/staff/finance/payments/"+UUID+"/verify"],["POST","/staff/finance/refunds"],["POST","/staff/finance/refunds/"+UUID+"/(?:decision|submit|verify)"],
+ ["GET","/staff/finance"],["POST","/staff/finance/invoices"],["POST","/staff/finance/invoices/"+UUID+"/checkout"],["POST","/staff/finance/invoices/"+UUID+"/void"],["POST","/staff/finance/payments/"+UUID+"/verify"],["POST","/staff/finance/refunds"],["POST","/staff/finance/refunds/"+UUID+"/(?:decision|submit|verify)"],
  ["GET","/staff/content"],["POST","/staff/content"],["POST","/staff/content/"+UUID+"/decision"],
  ["GET","/staff/procurement"],["GET","/staff/purchase-batches"],["POST","/staff/purchase-batches"],["POST","/staff/purchase-batches/"+UUID+"/decision"],["POST","/staff/stock/items"],["POST","/staff/suppliers"],["PUT","/staff/suppliers/"+UUID+"/state"],["POST","/staff/purchase-orders"],["POST","/staff/purchase-orders/"+UUID+"/decision"],["POST","/staff/stock/movements"],
  ["GET","/vacancies"],["POST","/staff/vacancies"],["POST","/staff/vacancies/"+UUID+"/decision"],["GET","/staff/applications"],["POST","/staff/applications/"+UUID+"/decision"],
