@@ -213,3 +213,17 @@ textarea{line-height:1.5}
 @media(max-width:1024px){.shell{width:calc(100% - 48px)}}
 @media(max-width:767px){.shell{width:calc(100% - 32px)}.guest-context{grid-template-columns:minmax(0,1fr);gap:12px;padding:18px 0}.guest-property-control{display:grid;grid-template-columns:minmax(0,1fr);gap:6px}.guest-property-control .button{margin-top:0}.guest-hero{grid-template-columns:minmax(0,1fr);gap:24px;padding:24px 0}.guest-hero h1{font-size:36px}.guest-human{padding:18px}.guest-nav{gap:4px 16px}.guest-nav a{font-size:13px}.guest-header .brand{font-size:20px}.guest-page .form-grid{grid-template-columns:minmax(0,1fr)}.guest-page .panel{padding:18px}.guest-page .actions .button{flex:1 1 150px}}
 @media(max-width:360px){.shell{width:calc(100% - 28px)}.guest-hero h1{font-size:32px}.guest-nav{gap:4px 12px}.guest-nav a{font-size:12px}.guest-page .panel{padding:14px}.guest-human .button{width:100%}.case-card-head{flex-wrap:wrap}.status-pill{white-space:normal}}
+
+/* Shared staff navigation with visible active route at every width. */
+.staff-header{flex-wrap:wrap;gap:8px 24px}
+.staff-header .brand{font-size:21px;letter-spacing:-.045em}
+.staff-header .status{margin-left:auto}
+.staff-header .staff-page-nav{flex-basis:100%;gap:8px 24px}
+.staff-header .staff-link{padding:0 2px;border-bottom:2px solid transparent;min-height:44px;font-size:14px}
+.staff-header .staff-link[aria-current=page]{color:#171717;border-bottom-color:#171717;font-weight:700}
+.stage-pill{max-width:100%;white-space:normal}
+.workspace-heading>*{min-width:0}
+.ops-detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+.ops-detail-grid>*{min-width:0}
+@media(max-width:1024px){.ops-detail-grid{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:767px){.staff-header .staff-page-nav{gap:2px 12px}.staff-header .staff-link{font-size:13px}.staff-header .status{display:block;flex-basis:100%;margin:0;font-size:11px}.workspace-heading .stage-pill{white-space:normal}.workspace-heading h1{font-size:30px}}
