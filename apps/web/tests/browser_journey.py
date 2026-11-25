@@ -92,7 +92,31 @@ def main():
                     staff.locator("#load").click()
                     expect(staff.locator("#visible-count")).not_to_have_text("No cases loaded")
                     expect(staff.locator(".case-card").filter(has_text=marker)).to_have_count(0)
-                    for route in ("/", "/staff", "/staff/tickets", "/staff/operations", "/staff/knowledge"):
+                    # The versioned page must never silently fall back to SQLite.
+                    # On this legacy-only branch its v1 endpoint returns 404;
+                    # on the combined backend branch an unknown property or missing
+                    # configured storage must still reject the request.
+                    v1 = browser.new_page(viewport={"width": 390, "height": 844})
+                    requests = []
+                    v1.on("request", lambda req: requests.append(req.url))
+                    v1.goto(BASE + "/static/guest-v1.html")
+                    v1.get_by_role("button", name="Contact reception", exact=True).click()
+                    expect(v1.locator("#v1-kind")).to_have_value("human")
+                    v1.locator("#v1-hotel").fill("unconfigured-browser-test-property")
+                    v1.locator("#v1-name").fill("Synthetic test")
+                    v1.locator("#v1-contact").fill("guest@example.invalid")
+                    v1.locator("#v1-details").fill("This synthetic request must not fall back.")
+                    v1.locator("#v1-submit").click()
+                    expect(v1.locator("#v1-submit")).to_have_text("Retry unchanged request")
+                    expect(v1.locator("#request-fields")).to_be_disabled()
+                    expect(v1.locator("#v1-track")).to_be_hidden()
+                    assert any("/api/v1/properties/" in url for url in requests)
+                    assert not any("/api/properties/" in url for url in requests)
+                    v1.on("dialog", lambda dialog: dialog.accept())
+                    v1.locator("#v1-discard").click()
+                    expect(v1.locator("#request-fields")).to_be_enabled()
+                    v1.close()
+                    for route in ("/", "/staff", "/staff/tickets", "/staff/operations", "/staff/knowledge", "/static/guest-v1.html"):
                         page = browser.new_page()
                         page.goto(BASE + route)
                         for width in WIDTHS:
@@ -103,7 +127,7 @@ def main():
                                 raise AssertionError(f"{route}: horizontal overflow at {width}px ({actual}px)")
                         page.close()
                     browser.close()
-                print("PASS: browser guest/reception/receipt/property journey and 30 responsive route checks")
+                print("PASS: browser guest/reception/receipt/property journey and 36 responsive route checks")
             finally:
                 server.terminate()
                 try:
