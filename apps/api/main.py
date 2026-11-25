@@ -520,3 +520,6 @@ install_room_pg_routes(app)
 
 from procurement_pg import install_procurement_routes
 install_procurement_routes(app)
+
+from dining_pg import install_dining_routes
+install_dining_routes(app)
