@@ -538,3 +538,6 @@ install_finance_routes(app)
 
 from departments_pg import install_department_routes
 install_department_routes(app)
+
+from cloudbeds_pg import install_pms_routes
+install_pms_routes(app)
