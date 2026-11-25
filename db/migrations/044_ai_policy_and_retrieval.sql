@@ -95,7 +95,7 @@ BEGIN
  RETURN v_id;
 END $$;
 CREATE FUNCTION worthkind_flow.manage_ai_source(p_subject text,p_slug text,p_content uuid,p_allow boolean)
-RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $
+RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
 DECLARE a record; rev bigint;
 BEGIN
  SELECT * INTO a FROM worthkind_flow.ops_actor(p_subject,p_slug);
@@ -109,7 +109,7 @@ BEGIN
  UPDATE worthkind_flow.ai_policies SET revision=revision+1 WHERE property_id=a.property_id RETURNING revision INTO rev;
  INSERT INTO worthkind_flow.ai_policy_events(property_id,actor,action,revision) VALUES(a.property_id,a.member_id,CASE WHEN p_allow THEN 'source_allowed' ELSE 'source_revoked' END,rev);
  RETURN p_allow;
-END $;
+END $$;
 -- Public approved content only. No guest records, financial data, personnel records or tools.
 CREATE FUNCTION worthkind_flow.ai_retrieve(p_slug text,p_call uuid,p_query text)
 RETURNS TABLE(id uuid,content_key text,version integer,title text,body text)
