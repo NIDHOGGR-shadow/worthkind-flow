@@ -24,7 +24,7 @@ import pytest
 
 MIGRATIONS = [
     Path(__file__).resolve().parents[3] / "db" / "migrations" / name
-    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql", "008_hotel_onboarding_settings.sql", "009_identity_provisioning.sql", "010_guest_quota.sql", "011_private_documents.sql", "012_operational_tickets.sql", "013_content_catalog.sql", "014_rooms_rates.sql", "015_rate_lookup_qualification.sql", "016_inventory_procurement.sql", "017_dining_kitchen.sql", "018_menu_lock_qualification.sql", "019_department_roles.sql", "020_staff_shifts.sql", "021_guest_preferences_feedback.sql", "022_reservation_intents.sql", "023_hotel_finance.sql", "024_events_recruitment.sql", "025_pms_accounts.sql", "026_reception_controls.sql", "027_payment_mode_boundaries.sql", "028_operations_read_contracts.sql", "029_native_booking_inventory.sql", "030_native_booking_changes.sql", "031_pos_receipt_evidence.sql", "032_purchase_batches.sql", "033_partial_refunds.sql", "034_native_stay_invoices.sql", "035_settlement_reconciliation.sql", "036_pms_reservation_evidence.sql", "037_native_stay_operations.sql", "038_pms_commands.sql", "039_provider_sync_guards.sql", "040_pos_refresh_worker.sql", "041_pos_cancellation_guard.sql", "042_pms_readback_recovery.sql", "043_provider_emergency_disable.sql", "044_ai_policy_and_retrieval.sql", "045_ai_automation_and_approvals.sql")
+    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql", "008_hotel_onboarding_settings.sql", "009_identity_provisioning.sql", "010_guest_quota.sql", "011_private_documents.sql", "012_operational_tickets.sql", "013_content_catalog.sql", "014_rooms_rates.sql", "015_rate_lookup_qualification.sql", "016_inventory_procurement.sql", "017_dining_kitchen.sql", "018_menu_lock_qualification.sql", "019_department_roles.sql", "020_staff_shifts.sql", "021_guest_preferences_feedback.sql", "022_reservation_intents.sql", "023_hotel_finance.sql", "024_events_recruitment.sql", "025_pms_accounts.sql", "026_reception_controls.sql", "027_payment_mode_boundaries.sql", "028_operations_read_contracts.sql", "029_native_booking_inventory.sql", "030_native_booking_changes.sql", "031_pos_receipt_evidence.sql", "032_purchase_batches.sql", "033_partial_refunds.sql", "034_native_stay_invoices.sql", "035_settlement_reconciliation.sql", "036_pms_reservation_evidence.sql", "037_native_stay_operations.sql", "038_pms_commands.sql", "039_provider_sync_guards.sql", "040_pos_refresh_worker.sql", "041_pos_cancellation_guard.sql", "042_pms_readback_recovery.sql", "043_provider_emergency_disable.sql", "044_ai_policy_and_retrieval.sql", "045_ai_automation_and_approvals.sql", "046_ai_retrieval_and_budget_guards.sql")
 ]
 
 
@@ -1318,3 +1318,68 @@ def test_pos_refresh_lease_and_cancelled_receipt(pg, seeded):
     ev=pg.execute("SELECT worthkind_flow.record_pos_receipt(%s,%s,%s,'pos-ci','store-ci','receipt-ci',10000,'NGN','SALE',%s,%s)",(subject,slug,order,created,newer)).fetchone()[0]
     assert ev["matched"] is False
     assert pg.execute("SELECT count(*) FROM worthkind_flow.hotel_payment_intents").fetchone()[0]==0
+
+
+def test_ai_platform_budget_retrieval_snapshot_and_approval(pg, seeded):
+    from psycopg.types.json import Jsonb
+    subject="idp:hotel-a-owner"
+    slug="hotel-a"
+    pg.execute("INSERT INTO worthkind_flow.property_settings(property_id) VALUES(%s)",(seeded["property_a"],))
+    pg.execute("SELECT worthkind_flow.configure_ai_platform(true,6)")
+    try:
+        with pytest.raises(errors.NoDataFound):
+            pg.execute("SELECT worthkind_flow.begin_ai_call(%s,NULL,'guest_chat')",(slug,))
+        pg.execute("SELECT worthkind_flow.approve_ai_provider(%s,true,'disposable approval evidence')",(slug,))
+        ids=[]
+        for key,title,body in (("breakfast","Breakfast","Breakfast served at seven"),("parking","Parking","Parking is free")):
+            cid=pg.execute("SELECT worthkind_flow.draft_content(%s,%s,%s,%s,'disposable source evidence')",(subject,slug,key,Jsonb({"title":title,"body":body}))).fetchone()[0]
+            pg.execute("SELECT worthkind_flow.decide_content(%s,%s,%s,'publish')",(subject,slug,cid))
+            pg.execute("SELECT worthkind_flow.manage_ai_source(%s,%s,%s,true)",(subject,slug,cid))
+            ids.append(cid)
+        policy=pg.execute("SELECT worthkind_flow.manage_ai_policy(%s,%s,NULL,NULL,NULL,NULL,NULL,NULL)",(subject,slug)).fetchone()[0]
+        pg.execute("SELECT worthkind_flow.manage_ai_policy(%s,%s,%s,true,true,true,true,6)",(subject,slug,policy["revision"]))
+        with pytest.raises(errors.InsufficientPrivilege):
+            pg.execute("SELECT worthkind_flow.manage_ai_policy(%s,%s,NULL,NULL,NULL,NULL,NULL,NULL)",("idp:hotel-a-reception",slug))
+        with pg.transaction():
+            pg.execute("SET LOCAL ROLE wf_ai_gateway")
+            cid=pg.execute("SELECT worthkind_flow.begin_ai_call(%s,NULL,'guest_chat')",(slug,)).fetchone()[0]
+            assert pg.execute("SELECT * FROM worthkind_flow.ai_retrieve('hotel-b',%s,'breakfast')",(cid,)).fetchall()==[]
+            result=pg.execute("SELECT * FROM worthkind_flow.ai_retrieve(%s,%s,'breakfast')",(slug,cid)).fetchall()
+            assert [r[0] for r in result]==[ids[0]]
+            assert pg.execute("SELECT * FROM worthkind_flow.ai_retrieve(%s,%s,'parking')",(slug,cid)).fetchall()==[]
+            assert pg.execute("SELECT worthkind_flow.finish_ai_call(%s,%s,'answered',%s)",(slug,cid,[ids[1]])).fetchone()[0] is False
+        with pytest.raises(errors.InsufficientPrivilege):
+            with pg.transaction():
+                pg.execute("SET LOCAL ROLE wf_ai_gateway")
+                pg.execute("SELECT * FROM worthkind_flow.guest_cases")
+        with pytest.raises(errors.InsufficientPrivilege):
+            with pg.transaction():
+                pg.execute("SET LOCAL ROLE wf_ai_gateway")
+                pg.execute("SELECT worthkind_flow.manage_ai_source(%s,%s,%s,true)",(subject,slug,ids[1]))
+        callid=pg.execute("SELECT worthkind_flow.begin_ai_call(%s,NULL,'voice')",(slug,)).fetchone()[0]
+        pg.execute("SELECT * FROM worthkind_flow.ai_retrieve(%s,%s,'breakfast')",(slug,callid))
+        assert pg.execute("SELECT worthkind_flow.finish_ai_call(%s,%s,'answered',%s)",(slug,callid,[ids[0]])).fetchone()[0] is True
+        with pytest.raises(errors.CheckViolation):
+            pg.execute("SELECT worthkind_flow.begin_ai_call(%s,NULL,'voice')",(slug,))
+        callid=pg.execute("SELECT worthkind_flow.begin_ai_call(%s,NULL,'guest_chat')",(slug,)).fetchone()[0]
+        pg.execute("SELECT * FROM worthkind_flow.ai_retrieve(%s,%s,'breakfast')",(slug,callid))
+        pg.execute("SELECT worthkind_flow.manage_ai_source(%s,%s,%s,false)",(subject,slug,ids[0]))
+        assert pg.execute("SELECT worthkind_flow.finish_ai_call(%s,%s,'answered',%s)",(slug,callid,[ids[0]])).fetchone()[0] is False
+        pid=pg.execute("SELECT worthkind_flow.propose_ai_ticket(%s,%s,'ai-disposable-proposal',repeat('a',64),'housekeeping','normal',decode(repeat('ab',40),'hex'))",("idp:hotel-a-housekeeper",slug)).fetchone()[0]
+        assert pg.execute("SELECT count(*) FROM worthkind_flow.service_tickets").fetchone()[0]==0
+        with pytest.raises(errors.InsufficientPrivilege):
+            pg.execute("SELECT worthkind_flow.decide_ai_ticket(%s,%s,%s,true)",("idp:hotel-a-housekeeper",slug,pid))
+        result=pg.execute("SELECT worthkind_flow.decide_ai_ticket(%s,%s,%s,true)",(subject,slug,pid)).fetchone()[0]
+        assert result["state"]=="executed"
+        assert pg.execute("SELECT worthkind_flow.decide_ai_ticket(%s,%s,%s,true)",(subject,slug,pid)).fetchone()[0]==result
+        pg.execute("UPDATE worthkind_flow.service_tickets SET due_at=now()-interval '1 hour' WHERE id=%s",(result["ticket_id"],))
+        with pg.transaction():
+            pg.execute("SET LOCAL ROLE wf_ai_automation")
+            assert pg.execute("SELECT worthkind_flow.scan_ai_alerts(100)").fetchone()[0]==1
+            assert pg.execute("SELECT worthkind_flow.scan_ai_alerts(100)").fetchone()[0]==0
+        assert pg.execute("SELECT count(*) FROM worthkind_flow.ai_internal_alerts").fetchone()[0]==1
+        pg.execute("SELECT worthkind_flow.configure_ai_platform(false,6)")
+        with pytest.raises(errors.NoDataFound):
+            pg.execute("SELECT worthkind_flow.begin_ai_call(%s,NULL,'guest_chat')",(slug,))
+    finally:
+        pg.execute("SELECT worthkind_flow.configure_ai_platform(false,1000)")
