@@ -532,3 +532,6 @@ install_guest_records(app)
 
 from reservations_pg import install_reservation_routes
 install_reservation_routes(app)
+
+from finance_pg import install_finance_routes
+install_finance_routes(app)
