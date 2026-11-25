@@ -22,6 +22,8 @@ class Checkout(BaseModel):
 class Refund(BaseModel):
     payment_id:UUID
     reason:str=Field(min_length=8,max_length=240)
+    amount_minor:int|None=Field(default=None,gt=0,le=900000000000000)
+    request_key:str|None=Field(default=None,min_length=8,max_length=100,pattern=r"^[A-Za-z0-9_-]+$")
 
 class Decision(BaseModel):
     action:Literal["approve","decline"]
@@ -124,7 +126,13 @@ def install_finance_routes(app):
 
     @app.post(base+"/refunds",status_code=201)
     def request_refund(slug:str,body:Refund,authorization:str|None=Header(None)):
-        r=command("SELECT worthkind_flow.request_hotel_refund(%s,%s,%s,%s)",(actor(authorization),slug,body.payment_id,body.reason))
+        subject=actor(authorization)
+        if body.amount_minor is not None and body.request_key is None:
+            raise HTTPException(422,"Idempotency key required for partial refund")
+        if body.request_key is None:
+            r=command("SELECT worthkind_flow.request_hotel_refund(%s,%s,%s,%s)",(subject,slug,body.payment_id,body.reason))
+        else:
+            r=command("SELECT worthkind_flow.request_partial_hotel_refund(%s,%s,%s,%s,%s,%s)",(subject,slug,body.payment_id,body.reason,body.amount_minor,body.request_key))
         return {"id":str(r[0]),"state":"requested"}
 
     @app.post(base+"/refunds/{refund_id}/decision")
