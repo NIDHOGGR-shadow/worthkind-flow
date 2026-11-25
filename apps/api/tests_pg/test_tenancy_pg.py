@@ -24,7 +24,7 @@ import pytest
 
 MIGRATIONS = [
     Path(__file__).resolve().parents[3] / "db" / "migrations" / name
-    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql", "008_hotel_onboarding_settings.sql", "009_identity_provisioning.sql", "010_guest_quota.sql", "011_private_documents.sql", "012_operational_tickets.sql", "013_content_catalog.sql", "014_rooms_rates.sql", "015_rate_lookup_qualification.sql")
+    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql", "008_hotel_onboarding_settings.sql", "009_identity_provisioning.sql", "010_guest_quota.sql", "011_private_documents.sql", "012_operational_tickets.sql", "013_content_catalog.sql", "014_rooms_rates.sql", "015_rate_lookup_qualification.sql", "016_inventory_procurement.sql")
 ]
 
 
@@ -961,3 +961,33 @@ def test_room_catalog_and_housekeeping_authority(pg, oidc_rig, monkeypatch):
     assert data["rooms"][0]["display_rates"][0]["amount_minor"]==2500000
     assert data["live_availability"] is False and data["rates_binding"] is False
     assert client.get("/api/v1/properties/hotel-b/rooms").json()["rooms"]==[]
+
+
+def test_stock_receiving_idempotency_and_tenant_scope(pg, oidc_rig, monkeypatch):
+    client,key,source=oidc_rig
+    monkeypatch.setenv("WF_OPERATIONS_POSTGRES_DSN",os.environ["WF_STAFF_POSTGRES_DSN"])
+    owner=auth_header(signed_token(key,"idp:hotel-a-owner"))
+    outsider=auth_header(signed_token(key,"idp:hotel-b-reception"))
+    base="/api/v1/properties/hotel-a/staff"
+    item=client.post(base+"/stock/items",json={"sku":"rice","name":"Rice","unit":"kg"},headers=owner)
+    assert item.status_code==201,item.text
+    iid=item.json()["id"]
+    supplier=client.post(base+"/suppliers",json={"name":"Test supplier","external_reference":"test-supplier"},headers=owner)
+    assert supplier.status_code==201,supplier.text
+    sid=supplier.json()["id"]
+    assert client.put(base+"/suppliers/"+sid+"/state",json={"state":"approved"},headers=owner).status_code==200
+    po=client.post(base+"/purchase-orders",json={"supplier_id":sid,"item_id":iid,"quantity":"10","unit_price_minor":1000,"currency":"NGN","request_key":"purchase-test-1"},headers=owner)
+    assert po.status_code==201,po.text
+    oid=po.json()["id"]
+    assert client.post(base+"/purchase-orders/"+oid+"/decision",json={"action":"approve"},headers=owner).status_code==200
+    movement={"item_id":iid,"order_id":oid,"quantity_delta":"4","reason":"Partial receipt","request_key":"receive-test-1"}
+    assert client.post(base+"/stock/movements",json=movement,headers=outsider).status_code==403
+    assert client.post(base+"/stock/movements",json=movement,headers=owner).status_code==201
+    assert client.post(base+"/stock/movements",json=movement,headers=owner).json()["duplicate"] is True
+    movement.update(quantity_delta="7",request_key="receive-test-2")
+    assert client.post(base+"/stock/movements",json=movement,headers=owner).status_code==409
+    movement.update(quantity_delta="6")
+    assert client.post(base+"/stock/movements",json=movement,headers=owner).status_code==201
+    report=client.get(base+"/procurement",headers=owner).json()
+    assert report["items"][0]["balance"]==10
+    assert report["orders"][0]["state"]=="received"
