@@ -25,7 +25,7 @@ const allowed=[
  ["GET","/staff/venue-requests"],["POST","/staff/venue-requests/"+UUID+"/decision"],
  ["GET","/staff/finance"],["POST","/staff/finance/invoices"],["POST","/staff/finance/invoices/"+UUID+"/checkout"],["POST","/staff/finance/payments/"+UUID+"/verify"],["POST","/staff/finance/refunds"],["POST","/staff/finance/refunds/"+UUID+"/(?:decision|submit|verify)"],
  ["GET","/staff/content"],["POST","/staff/content"],["POST","/staff/content/"+UUID+"/decision"],
- ["GET","/staff/procurement"],["POST","/staff/stock/items"],["POST","/staff/suppliers"],["PUT","/staff/suppliers/"+UUID+"/state"],["POST","/staff/purchase-orders"],["POST","/staff/purchase-orders/"+UUID+"/decision"],["POST","/staff/stock/movements"],
+ ["GET","/staff/procurement"],["GET","/staff/purchase-batches"],["POST","/staff/purchase-batches"],["POST","/staff/purchase-batches/"+UUID+"/decision"],["POST","/staff/stock/items"],["POST","/staff/suppliers"],["PUT","/staff/suppliers/"+UUID+"/state"],["POST","/staff/purchase-orders"],["POST","/staff/purchase-orders/"+UUID+"/decision"],["POST","/staff/stock/movements"],
  ["GET","/vacancies"],["POST","/staff/vacancies"],["POST","/staff/vacancies/"+UUID+"/decision"],["GET","/staff/applications"],["POST","/staff/applications/"+UUID+"/decision"],
  ["GET","/guest/cases/"+UUID+"/preferences"],["PUT","/guest/cases/"+UUID+"/preferences"],["POST","/guest/cases/"+UUID+"/feedback"],["POST","/guest/cases/"+UUID+"/applications"],
  ["GET","/staff/feedback"],["POST","/staff/feedback/"+UUID+"/review"],
