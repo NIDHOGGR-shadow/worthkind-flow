@@ -83,11 +83,11 @@
     if(!ctx.slug){say("staff-message","Select a hotel code first.");return false;}
     const stamp=ctx.stamp();say("staff-message",loading);
     try{const task=ctx.run(op);controls();const data=await task;if(!ctx.isCurrent(stamp)||!session.signedIn)return false;apply(data);return true;}
-    catch(e){if(!ctx.isCurrent(stamp))return false;if(e.status===401){localExit("Session expired or rejected. Sign in again.");return false;}say("staff-message",e.message);return false;}
+    catch(e){if(!ctx.isCurrent(stamp))return false;if(e.status===401){localExit("Session expired or rejected. Sign in again.");return false;}if(e.status===403){cases=null;tickets=null;settings=null;renderCases();renderTickets();el("settings-form").hidden=true;say("case-summary","Access must be verified again.");say("membership-result","");}say("staff-message",e.message);return false;}
     finally{controls();}
   }
   async function loadCases(){
-    cases=null;renderCases();return run(slug=>api.cases(slug),data=>{cases=data;renderCases();say("staff-message","Reception queue loaded from server.");});
+    cases=null;renderCases();say("case-summary","No verified queue loaded.");return run(slug=>api.cases(slug),data=>{cases=data;renderCases();say("staff-message","Reception queue loaded from server.");});
   }
   async function loadTickets(){
     tickets=null;renderTickets();return run(slug=>api.tickets(slug),data=>{tickets=data;renderTickets();say("staff-message","Department tickets loaded from server.");});
@@ -138,7 +138,7 @@
     try{await session.signIn(el("email").value.trim(),password);el("login-panel").hidden=true;el("staff-workspace").hidden=false;el("signout").hidden=false;showView("cases");expiryTimer=setTimeout(()=>localExit("Session expired. Sign in again."),Math.max(0,session.expiresAt-Date.now()));el("staff-slug").focus();}
     catch(e){say("login-status",e.message);}finally{authBusy=false;controls();}
   });
-  el("signout").addEventListener("click",async()=>{if(authBusy)return;authBusy=true;const task=session.signOut();localExit("Signed out of this workspace.");const revoked=await task;authBusy=false;controls();if(!revoked)say("login-status","Signed out locally. Provider session revocation could not be confirmed.");});
+  el("signout").addEventListener("click",async()=>{if(authBusy)return;if(pendingTicket&&!confirm("A ticket submission is unconfirmed. Signing out discards its local retry key, not the server record. Continue?"))return;authBusy=true;const task=session.signOut();localExit("Signed out of this workspace.");const revoked=await task;authBusy=false;controls();if(!revoked)say("login-status","Signed out locally. Provider session revocation could not be confirmed.");});
   window.addEventListener("pagehide",()=>{clearTimeout(expiryTimer);session?.clear();ctx.select("");clearData();});
   window.addEventListener("pageshow",e=>{if(e.persisted)localExit("Sign in again to access staff records.");});
   (async()=>{try{const r=await fetch(new URL("./staff-auth-config.json",location.href),{cache:"no-store",credentials:"same-origin",redirect:"error"});if(!r.ok)throw staffError("Staff identity configuration unavailable.");session=staffSession(window.fetch.bind(window),await r.json());api=staffApi(window.fetch.bind(window),session);say("login-status","Sign in with your confirmed hotel identity.");}catch{say("login-status","Staff sign-in is unavailable until an authorized identity provider is configured.");}finally{controls();}})();
