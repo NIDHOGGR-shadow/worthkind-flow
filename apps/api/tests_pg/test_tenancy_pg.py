@@ -24,7 +24,7 @@ import pytest
 
 MIGRATIONS = [
     Path(__file__).resolve().parents[3] / "db" / "migrations" / name
-    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql")
+    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql")
 ]
 
 
@@ -763,3 +763,13 @@ def test_separate_database_logins_cannot_swap_guest_and_staff_capabilities(pg, s
                 ("idp:hotel-a-owner", "hotel-a", "case:read"),
             ).fetchone()
             assert row[2] == seeded["property_a"]
+
+
+def test_suspended_organization_blocks_direct_runtime_reads(pg, seeded):
+    pg.execute("UPDATE worthkind_flow.organizations SET status='suspended' WHERE id=%s", (seeded["org_a"],))
+    with actor_session(pg, seeded["owner"]):
+        for table in ("organizations", "properties", "guest_cases"):
+            assert rows(pg, table) == []
+    with actor_session(pg, seeded["outsider"]):
+        assert len(rows(pg, "guest_cases")) == 1
+        assert rows(pg, "guest_cases")[0][0] == seeded["case_b"]
