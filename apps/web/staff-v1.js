@@ -31,7 +31,7 @@
     el("ticket-fields").disabled=locked||!!pendingTicket;
     el("ticket-create").textContent=pendingTicket?"Retry unchanged ticket":"Create ticket";
     el("ticket-discard").hidden=!pendingTicket;
-    commerce.controls();management.controls();native.controls();
+    commerce.controls();management.controls();native.controls();evidence.controls();
   }
   function localExit(message){
     clearTimeout(expiryTimer);session?.clear();ctx.select("");clearData();
@@ -184,7 +184,7 @@
     e.preventDefault();if(ctx.busy)return;
     const slug=el("staff-slug").value.trim();
     if(!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)||slug.length>100)return;
-    if((pendingTicket||commerce.pending||management.pending||native.pending)&&!confirm("An unconfirmed ticket, dining order, stock operation or room hold may already exist. Switching property discards its local retry key. Continue?"))return;
+    if((pendingTicket||commerce.pending||management.pending||native.pending||evidence.pending)&&!confirm("An unconfirmed ticket, dining order, stock operation, room hold or provider command may already exist. Switching property discards its local retry key. Continue?"))return;
     ctx.select(slug);clearData();say("property-label","Selected: "+slug+" · Access checked by each server request.");say("staff-message","Select a module and load its authorized records.");controls();
   });
   el("load-cases").addEventListener("click",loadCases);el("case-filter").addEventListener("change",renderCases);
@@ -213,7 +213,7 @@
     try{await session.signIn(el("email").value.trim(),password);el("login-panel").hidden=true;el("staff-workspace").hidden=false;el("signout").hidden=false;showView("cases");expiryTimer=setTimeout(()=>localExit("Session expired. Sign in again."),Math.max(0,session.expiresAt-Date.now()));el("staff-slug").focus();}
     catch(e){say("login-status",e.message);}finally{authBusy=false;controls();}
   });
-  el("signout").addEventListener("click",async()=>{if(authBusy)return;if((pendingTicket||commerce.pending||management.pending||native.pending)&&!confirm("A ticket, dining order, stock operation or room hold is unconfirmed. Signing out discards its local retry key, not the server record. Continue?"))return;authBusy=true;const task=session.signOut();localExit("Signed out of this workspace.");const revoked=await task;authBusy=false;controls();if(!revoked)say("login-status","Signed out locally. Provider session revocation could not be confirmed.");});
+  el("signout").addEventListener("click",async()=>{if(authBusy)return;if((pendingTicket||commerce.pending||management.pending||native.pending||evidence.pending)&&!confirm("A ticket, dining order, stock operation, room hold or provider command is unconfirmed. Signing out discards its local retry key, not the server record. Continue?"))return;authBusy=true;const task=session.signOut();localExit("Signed out of this workspace.");const revoked=await task;authBusy=false;controls();if(!revoked)say("login-status","Signed out locally. Provider session revocation could not be confirmed.");});
   window.addEventListener("pagehide",()=>{clearTimeout(expiryTimer);session?.clear();ctx.select("");clearData();});
   window.addEventListener("pageshow",e=>{if(e.persisted)localExit("Sign in again to access staff records.");});
   (async()=>{try{const r=await fetch(new URL("./staff-auth-config.json",location.href),{cache:"no-store",credentials:"same-origin",redirect:"error"});if(!r.ok)throw staffError("Staff identity configuration unavailable.");session=staffSession(window.fetch.bind(window),await r.json());api=staffApi(window.fetch.bind(window),session);say("login-status","Sign in with your confirmed hotel identity.");}catch{say("login-status","Staff sign-in is unavailable until an authorized identity provider is configured.");}finally{controls();}})();
