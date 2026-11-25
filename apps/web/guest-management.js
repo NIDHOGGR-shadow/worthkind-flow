@@ -1,5 +1,5 @@
 "use strict";
-function initGuestManagement(journey,commerce){
+function initGuestManagement(journey,commerce,otherBusy=()=>false){
  const el=id=>document.getElementById(id),api=managementApi(window.fetch.bind(window)),say=(id,t)=>{el(id).textContent=t;};
  const node=(tag,t)=>{const n=document.createElement(tag);if(t!==undefined)n.textContent=String(t);return n;};
  let active=null,epoch=0,publicEpoch=0,busy=false,revision=null,applicationSent=false,feedbackSent=false,uncertainApplication=false,uncertainFeedback=false;
@@ -8,13 +8,13 @@ function initGuestManagement(journey,commerce){
    el("guest-records").querySelectorAll("button,input,select,textarea").forEach(n=>{n.disabled=busy;});
    el("guest-feedback-form").querySelector("button[type=submit]").disabled=busy||feedbackSent||uncertainFeedback;
    el("guest-application-form").querySelector("button[type=submit]").disabled=busy||applicationSent||uncertainApplication;
-   el("v1-new").disabled=busy||journey.busy||commerce.busy;
-   el("v1-refresh").disabled=busy||journey.busy||commerce.busy;
+   el("v1-new").disabled=busy||journey.busy||commerce.busy||otherBusy();
+   el("v1-refresh").disabled=busy||journey.busy||commerce.busy||otherBusy();
  }
  function reset(){++epoch;active=null;busy=false;revision=null;applicationSent=false;feedbackSent=false;uncertainApplication=false;uncertainFeedback=false;el("guest-records").hidden=true;el("preferences-form").hidden=true;for(const id of ["preferences-form","guest-feedback-form","guest-application-form"])el(id).reset();el("application-vacancy").replaceChildren();const o=node("option","Load available vacancies");o.value="";el("application-vacancy").append(o);say("guest-records-context","");say("guest-records-message","");say("application-receipt","");controls();}
  function activate(){const next=journey.active;if(!next){reset();return;}if(same(next,active))return;reset();active=next;el("guest-records").hidden=false;say("guest-records-context","Hotel: "+active.slug+" · Private receipt required for each operation.");}
  async function run(op,apply,onUncertain){
-   if(busy||journey.busy||commerce.busy||!active)return false;
+   if(busy||journey.busy||commerce.busy||otherBusy()||!active)return false;
    const stamp=epoch,receipt=active;busy=true;controls();say("guest-records-message","Checking service…");
    try{const d=await op(receipt);if(stamp!==epoch||!same(receipt,journey.active))return false;apply(d);return true;}
    catch(e){if(stamp===epoch){if(onUncertain&&(!e.status||e.status>=500))onUncertain();say("guest-records-message",e.message);}return false;}
