@@ -36,3 +36,24 @@ test("real HTTP gateway serves only approved assets, forwards approved versioned
   assert.equal((await fetch(base+"/api/v1/properties/hotel-a/staff/settings",{method:"PUT",headers:{"Content-Type":"text/html"},body:"test"})).status,415);
  }finally{gateway.closeAllConnections();upstream.closeAllConnections();await Promise.all([new Promise(r=>gateway.close(r)),new Promise(r=>upstream.close(r))]);}
 });
+
+test("document gateway is disabled by default; enabled routes accept only authenticated bounded binary attachments",async()=>{
+ const seen=[];const id="12345678-1234-1234-1234-123456789abc",bytes=Buffer.from([0,1,2,255]);
+ const upstream=http.createServer(async(req,res)=>{const parts=[];for await(const chunk of req)parts.push(chunk);seen.push({url:req.url,headers:req.headers,body:Buffer.concat(parts)});if(req.method==="POST"){res.writeHead(201,{"Content-Type":"application/json"});res.end(JSON.stringify({document_id:id,size:4}));}else if(req.url.includes("html-test")){res.writeHead(200,{"Content-Type":"text/html","Content-Disposition":"inline"});res.end("<script>unsafe</script>");}else{res.writeHead(200,{"Content-Type":"application/octet-stream","Content-Disposition":"attachment; filename=untrusted.html","Set-Cookie":"untrusted=1"});res.end(bytes);}});
+ upstream.listen(0,"127.0.0.1");await once(upstream,"listening");
+ const settings={upstream:"http://127.0.0.1:"+upstream.address().port,identity:{enabled:false}};
+ const enabled=http.createServer(handler({...settings,documentsEnabled:true})),disabled=http.createServer(handler(settings));
+ for(const server of [enabled,disabled]){server.listen(0,"127.0.0.1");await once(server,"listening");}
+ const base="http://127.0.0.1:"+enabled.address().port,off="http://127.0.0.1:"+disabled.address().port,route="/api/v1/properties/hotel-a/staff/documents";
+ const headers={Authorization:"Bearer fixture.token","Content-Type":"application/octet-stream"};
+ try{
+  assert.equal((await fetch(off+route+"/"+id,{headers})).status,503);
+  assert.equal((await fetch(base+route+"/"+id)).status,401);
+  assert.equal((await fetch(base+route,{method:"POST",headers:{...headers,"Content-Type":"text/html"},body:"bad"})).status,415);
+  assert.equal((await fetch(base+route,{method:"POST",headers,body:Buffer.alloc(2000001)})).status,413);
+  assert.equal(seen.length,0);
+  const upload=await fetch(base+route,{method:"POST",headers,body:bytes});assert.equal(upload.status,201);assert.deepEqual(seen[0].body,bytes);
+  const download=await fetch(base+route+"/"+id,{headers});assert.equal(download.status,200);assert.deepEqual(Buffer.from(await download.arrayBuffer()),bytes);assert.equal(download.headers.get("content-disposition"),'attachment; filename="private-document.bin"');assert.equal(download.headers.get("set-cookie"),null);assert.equal(download.headers.get("cache-control"),"no-store");
+  assert.equal((await fetch(base+"/api/v1/properties/html-test/staff/documents/"+id,{headers})).status,502);
+ }finally{for(const server of [enabled,disabled,upstream])server.closeAllConnections();await Promise.all([enabled,disabled,upstream].map(server=>new Promise(r=>server.close(r))));}
+});
