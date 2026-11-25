@@ -23,7 +23,7 @@ def check_staff_v1(browser, base):
 
     page = browser.new_page(viewport={"width": 390, "height": 844})
     calls = []
-    state = {"case": "queued", "ticket": "open", "settings": True, "revision": 1}
+    state = {"case": "queued", "ticket": "open", "settings": True, "revision": 1, "shift": None, "room": "dirty", "room_revision": 1}
     page.on("dialog", lambda dialog: dialog.accept())
     page.route("**/staff-auth-config.json", lambda route: route.fulfill(json={
         "enabled": True, "provider": "supabase", "url": PROVIDER,
@@ -69,6 +69,32 @@ def check_staff_v1(browser, base):
             assert request.post_data_json["message"] == "Synthetic response"
             state["case"] = "responded"
             route.fulfill(json={"property": "hotel-a", "case_id": CASE_ID, "status": "responded"})
+        elif path == prefix + "/cases/" + CASE_ID + "/control":
+            assert request.post_data_json["action"] == "escalate"
+            state["case"] = "escalated"
+            route.fulfill(json={"case_id": CASE_ID, "state": "escalated"})
+        elif path == prefix + "/schedule":
+            route.fulfill(json={"members": [{"membership_id": MEMBER_ID, "role": "reception",
+                                           "state": "active", "display_name": "Synthetic staff"}],
+                               "shifts": [] if state["shift"] is None else [{
+                                   "id": TICKET_ID, "membership_id": MEMBER_ID, "state": state["shift"],
+                                   "starts_at": "2026-11-25T08:00:00Z", "ends_at": "2026-11-25T16:00:00Z"}]})
+        elif path == prefix + "/shifts":
+            assert request.post_data_json["membership_id"] == MEMBER_ID
+            state["shift"] = "scheduled"
+            route.fulfill(json={"id": TICKET_ID, "state": "scheduled"})
+        elif path == prefix + "/shifts/" + TICKET_ID + "/cancel":
+            state["shift"] = "cancelled"
+            route.fulfill(json={"id": TICKET_ID, "state": "cancelled"})
+        elif path == prefix + "/rooms":
+            route.fulfill(json={"rooms": [{"id": TICKET_ID, "room_type_id": CASE_ID,
+                                         "label": "312", "operational_state": state["room"],
+                                         "revision": state["room_revision"]}], "occupancy_verified": False})
+        elif path == prefix + "/rooms/" + TICKET_ID + "/state":
+            assert request.post_data_json == {"state": "inspecting", "revision": 1}
+            state["room"] = "inspecting"
+            state["room_revision"] = 2
+            route.fulfill(json={"id": TICKET_ID, "operational_state": "inspecting", "revision": 2})
         elif path == prefix + "/tickets" and request.method == "GET":
             route.fulfill(json={"tickets": [{"id": TICKET_ID, "status": state["ticket"], "category": "maintenance",
                                             "priority": "high", "subject": "Synthetic maintenance issue",
@@ -109,6 +135,10 @@ def check_staff_v1(browser, base):
     page.locator("#reply-" + CASE_ID).fill("Synthetic response")
     page.get_by_role("button", name="Record response", exact=True).click()
     expect(page.locator("#v1-cases")).to_contain_text("responded")
+    page.get_by_text("Case controls", exact=True).click()
+    page.locator("#reason-" + CASE_ID).fill("Manager review requested")
+    page.get_by_role("button", name="Escalate", exact=True).click()
+    expect(page.locator("#v1-cases")).to_contain_text("escalated")
     page.get_by_role("button", name="Department work", exact=True).click()
     page.locator("#load-tickets").click()
     expect(page.locator("#v1-tickets")).to_contain_text("Overdue")
@@ -123,7 +153,26 @@ def check_staff_v1(browser, base):
     page.locator("#guest-enabled").uncheck()
     page.get_by_role("button", name="Save settings", exact=True).click()
     expect(page.locator("#settings-version")).to_have_text("Revision 2")
-    for label in ("Reception", "Department work", "Memberships", "Hotel settings"):
+    page.get_by_role("button", name="Staff schedule", exact=True).click()
+    page.locator("#schedule-start").fill("2026-11-24T00:00")
+    page.locator("#schedule-end").fill("2026-11-27T00:00")
+    page.get_by_role("button", name="Load schedule", exact=True).click()
+    expect(page.locator("#staff-roster")).to_contain_text("Synthetic staff")
+    page.get_by_role("button", name="Use for profile or shift").click()
+    page.locator("summary").filter(has_text="Schedule a shift").click()
+    page.locator("#shift-start").fill("2026-11-25T08:00")
+    page.locator("#shift-end").fill("2026-11-25T16:00")
+    page.get_by_role("button", name="Schedule shift", exact=True).click()
+    expect(page.locator("#staff-shifts")).to_contain_text("scheduled")
+    page.get_by_role("button", name="Cancel shift").click()
+    expect(page.locator("#staff-shifts")).to_contain_text("cancelled")
+    page.get_by_role("button", name="Room readiness", exact=True).click()
+    page.locator("#load-rooms").click()
+    expect(page.locator("#staff-rooms")).to_contain_text("dirty")
+    page.locator("#room-" + TICKET_ID).select_option("inspecting")
+    page.get_by_role("button", name="Update room condition").click()
+    expect(page.locator("#staff-rooms")).to_contain_text("Revision 2")
+    for label in ("Reception", "Department work", "Memberships", "Staff schedule", "Room readiness", "Hotel settings"):
         page.get_by_role("button", name=label, exact=True).click()
         for width in WIDTHS:
             page.set_viewport_size({"width": width, "height": 900})
@@ -133,6 +182,8 @@ def check_staff_v1(browser, base):
     page.get_by_role("button", name="Select property").click()
     expect(page.locator("#v1-cases")).to_be_empty()
     expect(page.locator("#v1-tickets")).to_be_empty()
+    expect(page.locator("#staff-roster")).to_be_empty()
+    expect(page.locator("#staff-rooms")).to_be_empty()
     page.get_by_role("button", name="Reception", exact=True).click()
     page.locator("#load-cases").click()
     expect(page.locator("#staff-message")).to_contain_text("not authorized")
@@ -142,4 +193,4 @@ def check_staff_v1(browser, base):
     expect(page.locator("#staff-workspace")).to_be_hidden()
     assert all(path.startswith("/api/v1/") for _, path in calls)
     page.close()
-    print("PASS: staff v1 Chromium fixture journey and 24 authenticated-layout checks")
+    print("PASS: staff v1 Chromium fixture journey and 36 authenticated-layout checks")
