@@ -4,6 +4,7 @@
   const api=guestApi(window.fetch.bind(window));
   const randomHex=n=>Array.from(crypto.getRandomValues(new Uint8Array(n)),b=>b.toString(16).padStart(2,"0")).join("");
   const journey=createGuestJourney(api,randomHex);
+  const commerce=initGuestCommerce(journey);
   const say=(id,msg)=>{el(id).textContent=msg;};
   const statusText={queued:"Recorded — waiting for staff acceptance",claimed:"Accepted by staff",responded:"Staff response recorded",escalated:"Escalated for staff review",resolved:"Marked resolved by staff — guest confirmation not recorded"};
   function controls(){
@@ -15,11 +16,12 @@
     el("v1-discard").disabled=journey.busy;
     el("v1-recover").disabled=journey.busy||journey.pending||!!journey.active;
     el("v1-refresh").disabled=journey.busy||!journey.active;
-    el("v1-new").disabled=journey.busy;
+    el("v1-new").disabled=journey.busy||commerce.busy;
     document.querySelectorAll("[data-service]").forEach(b=>{b.disabled=journey.busy||journey.pending||!!journey.active;});
   }
   function render(result,focus){
     const active=journey.active;
+    commerce.activate();
     el("v1-track").hidden=false;
     say("v1-case-status",statusText[result.status]+". No reservation, payment or external notification is confirmed.");
     say("v1-reply",typeof result.staff_reply==="string"?result.staff_reply:"No staff response returned yet.");
@@ -45,7 +47,7 @@
     finally{controls();}
   });
   el("v1-refresh").addEventListener("click",async()=>{
-    if(journey.busy||!journey.active)return;
+    if(journey.busy||commerce.busy||!journey.active)return;
     say("v1-case-status","Checking latest status…");
     try{const task=journey.refresh();controls();render(await task,false);}
     catch(err){say("v1-case-status",err.message+" The previous state is not newly verified.");}
@@ -59,8 +61,9 @@
   });
   el("v1-new").addEventListener("click",()=>{
     if(journey.busy||!journey.active)return;
+    if(commerce.pending&&!window.confirm("An unconfirmed stay or venue request may exist. Starting over discards its local retry proof. Continue?"))return;
     if(!window.confirm("Have you saved the private receipt? Starting over removes it from this page."))return;
-    journey.reset();el("v1-form").reset();el("v1-recover-form").reset();el("v1-track").hidden=true;el("v1-receipt").hidden=true;say("v1-receipt","");say("v1-reply","");say("v1-case-status","");say("v1-recover-status","");say("v1-submit-status","Ready for a new request.");controls();el("v1-hotel").focus();
+    journey.reset();commerce.reset();el("v1-form").reset();el("v1-recover-form").reset();el("v1-track").hidden=true;el("v1-receipt").hidden=true;say("v1-receipt","");say("v1-reply","");say("v1-case-status","");say("v1-recover-status","");say("v1-submit-status","Ready for a new request.");controls();el("v1-hotel").focus();
   });
   controls();
 })();
