@@ -54,12 +54,47 @@ def check_staff_v1(browser, base):
         request = route.request
         path = urlsplit(request.url).path
         calls.append((request.method, path))
+        if path == "/api/v1/properties/hotel-a/menu":
+            assert request.headers.get("authorization") is None
+            route.fulfill(json={"items":[{"id":TICKET_ID,"name":"Synthetic meal","price_minor":250000,"currency":"NGN"}]})
+            return
         assert request.headers.get("authorization") == "Bearer fixture.token.value"
         if "/hotel-b/" in path:
             route.fulfill(status=403, json={"detail": "Access denied"})
             return
         prefix = "/api/v1/properties/hotel-a/staff"
-        if path == prefix + "/cases":
+        if path == prefix + "/reservation-intents":
+            route.fulfill(json={"intents":[{"id":CASE_ID,"case_id":CASE_ID,"state":state.get("stay","requested"),"arrival":"2026-12-01","departure":"2026-12-03","adults":2,"children":0,"room_count":1}]})
+        elif path == prefix + "/reservation-intents/" + CASE_ID + "/review":
+            assert request.post_data_json["action"] == "review"
+            state["stay"]="under_review"
+            route.fulfill(json={"id":CASE_ID,"state":"under_review","booking_confirmed":False})
+        elif path == prefix + "/pms/availability":
+            route.fulfill(json={"provider":"cloudbeds","inventory_held":False,"rates_binding":False,"retrieved_at":"2026-11-25T20:00:00Z","room_types":[{"room_type_id":"SYNTHETIC","rooms_available":2}]})
+        elif path == prefix + "/dining/orders":
+            if request.method == "POST":
+                assert request.post_data_json["lines"] == [{"item_id":TICKET_ID,"quantity":2}]
+                state["order"]="submitted"
+                route.fulfill(json={"id":TICKET_ID,"state":"submitted","total_minor":500000,"currency":"NGN","payment_confirmed":False})
+            else:
+                route.fulfill(json={"orders":[{"id":TICKET_ID,"state":state["order"],"total_minor":500000,"currency":"NGN","lines":[{"name":"Synthetic meal","quantity":2}]}] if "order" in state else []})
+        elif path == prefix + "/dining/orders/" + TICKET_ID + "/transition":
+            assert request.post_data_json["action"] == "accept"
+            state["order"]="accepted"
+            route.fulfill(json={"id":TICKET_ID,"state":"accepted","payment_confirmed":False})
+        elif path == prefix + "/venue-requests":
+            route.fulfill(json={"requests":[{"id":CASE_ID,"venue_id":TICKET_ID,"state":state.get("venue","requested"),"starts_at":"2026-12-01T08:00:00Z","ends_at":"2026-12-01T12:00:00Z","attendance":20}]})
+        elif path == prefix + "/venue-requests/" + CASE_ID + "/decision":
+            state["venue"]="reviewed"
+            route.fulfill(json={"id":CASE_ID,"state":"reviewed"})
+        elif path == prefix + "/finance":
+            route.fulfill(json={"invoices":[{"id":CASE_ID,"dining_order_id":TICKET_ID,"amount_minor":500000,"currency":"NGN","state":"issued"}],"payments":[{"id":TICKET_ID,"invoice_id":CASE_ID,"amount_minor":500000,"currency":"NGN","mode":"test","state":state.get("payment","pending"),"reference":"wf-"+TICKET_ID}],"refunds":[],"exceptions":[]})
+        elif path == prefix + "/finance/invoices/" + CASE_ID + "/checkout":
+            route.fulfill(json={"id":TICKET_ID,"reference":"wf-"+TICKET_ID,"state":"pending","mode":"test","checkout_url":"https://checkout.paystack.com/synthetic","payment_confirmed":False})
+        elif path == prefix + "/finance/payments/" + TICKET_ID + "/verify":
+            state["payment"]="verified"
+            route.fulfill(json={"id":TICKET_ID,"state":"verified","mode":"test","payment_confirmed":False})
+        elif path == prefix + "/cases":
             route.fulfill(json={"property": "hotel-a", "staff_role": "reception",
                                "cases": [{"id": CASE_ID, "status": state["case"], "kind": "human",
                                           "customer_name": "Synthetic guest", "contact": "guest@example.invalid",
@@ -181,7 +216,37 @@ def check_staff_v1(browser, base):
     page.locator("#room-" + TICKET_ID).select_option("inspecting")
     page.get_by_role("button", name="Update room condition").click()
     expect(page.locator("#staff-rooms")).to_contain_text("Revision 2")
-    for label in ("Reception", "Department work", "Memberships", "Staff schedule", "Room readiness", "Hotel settings"):
+    page.get_by_role("button", name="Reservations", exact=True).click()
+    page.locator("#load-reservations").click()
+    expect(page.locator("#reservation-queue")).to_contain_text("requested")
+    page.locator("#reservation-queue").get_by_role("button", name="review", exact=True).click()
+    expect(page.locator("#reservation-queue")).to_contain_text("under review")
+    page.locator("#pms-start").fill("2026-12-01")
+    page.locator("#pms-end").fill("2026-12-03")
+    page.get_by_role("button", name="Check provider availability").click()
+    expect(page.locator("#pms-availability-result")).to_contain_text("Inventory not held")
+    page.get_by_role("button", name="Dining", exact=True).click()
+    page.locator("#load-order-menu").click()
+    expect(page.locator("#order-menu")).to_contain_text("Synthetic meal")
+    page.locator("#order-menu input[data-menu-id]").fill("2")
+    page.locator("#dining-submit").click()
+    expect(page.locator("#dining-queue")).to_contain_text("submitted")
+    page.locator("#dining-queue").get_by_role("button", name="accept", exact=True).click()
+    expect(page.locator("#dining-queue")).to_contain_text("accepted")
+    page.get_by_role("button", name="Events", exact=True).click()
+    page.locator("#load-events").click()
+    page.locator("#events-queue").get_by_role("button", name="review", exact=True).click()
+    expect(page.locator("#events-queue")).to_contain_text("reviewed")
+    page.get_by_role("button", name="Finance", exact=True).click()
+    page.locator("#load-finance").click()
+    expect(page.locator("#finance-invoices")).to_contain_text("issued")
+    page.locator("#finance-invoices input[type=email]").fill("payer@example.invalid")
+    page.get_by_role("button", name="Prepare Paystack checkout").click()
+    expect(page.get_by_role("link", name="Open test Paystack checkout")).to_have_attribute("href","https://checkout.paystack.com/synthetic")
+    page.get_by_role("button", name="Verify provider payment").click()
+    expect(page.locator("#finance-payments")).to_contain_text("verified")
+    expect(page.locator("#finance-payments")).to_contain_text("Mode: test")
+    for label in ("Reception", "Department work", "Memberships", "Staff schedule", "Room readiness", "Hotel settings","Reservations","Catalog","Dining","Events","Finance"):
         page.get_by_role("button", name=label, exact=True).click()
         for width in WIDTHS:
             page.set_viewport_size({"width": width, "height": 900})
@@ -197,6 +262,9 @@ def check_staff_v1(browser, base):
     expect(page.locator("#v1-tickets")).to_be_empty()
     expect(page.locator("#staff-roster")).to_be_empty()
     expect(page.locator("#staff-rooms")).to_be_empty()
+    expect(page.locator("#finance-payments")).to_be_empty()
+    expect(page.locator("#dining-queue")).to_be_empty()
+    expect(page.locator("#reservation-queue")).to_be_empty()
     page.get_by_role("button", name="Reception", exact=True).click()
     page.locator("#load-cases").click()
     expect(page.locator("#staff-message")).to_contain_text("not authorized")
@@ -206,4 +274,4 @@ def check_staff_v1(browser, base):
     expect(page.locator("#staff-workspace")).to_be_hidden()
     assert all(path.startswith("/api/v1/") for _, path in calls)
     page.close()
-    print("PASS: staff v1 Chromium fixture journey and 36 authenticated-layout checks")
+    print("PASS: staff v1 Chromium fixture journey and 66 authenticated-layout checks")
