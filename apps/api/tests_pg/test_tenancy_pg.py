@@ -24,7 +24,7 @@ import pytest
 
 MIGRATIONS = [
     Path(__file__).resolve().parents[3] / "db" / "migrations" / name
-    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql")
+    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql", "008_hotel_onboarding_settings.sql", "009_identity_provisioning.sql")
 ]
 
 
@@ -55,6 +55,10 @@ def pg():
         conn.execute("GRANT wf_staff_lifecycle TO wf_ci_lifecycle")
         conn.execute("CREATE ROLE wf_ci_projector LOGIN NOINHERIT PASSWORD 'worthkind_ci_projector_only'")
         conn.execute("GRANT wf_event_projector TO wf_ci_projector")
+        conn.execute("CREATE ROLE wf_ci_provisioner LOGIN NOINHERIT PASSWORD 'worthkind_ci_provisioner_only'")
+        conn.execute("GRANT wf_hotel_provisioner TO wf_ci_provisioner")
+        conn.execute("CREATE ROLE wf_ci_config LOGIN NOINHERIT PASSWORD 'worthkind_ci_config_only'")
+        conn.execute("GRANT wf_property_config TO wf_ci_config")
         yield conn
 
 
@@ -505,6 +509,7 @@ def oidc_rig(pg, seeded, monkeypatch, tmp_path):
     monkeypatch.setenv("WF_STAFF_LIFECYCLE_POSTGRES_DSN", make_conninfo(os.environ["WF_TEST_POSTGRES_DSN"], user="wf_ci_lifecycle", password="worthkind_ci_lifecycle_only"))
     monkeypatch.setenv("WF_DATA_KEY_B64", base64.b64encode(os.urandom(32)).decode())
     monkeypatch.setenv("WF_ENABLE_PG_GUEST_API", "1")
+    monkeypatch.setenv("WF_PROPERTY_CONFIG_POSTGRES_DSN", make_conninfo(os.environ["WF_TEST_POSTGRES_DSN"], user="wf_ci_config", password="worthkind_ci_config_only"))
     monkeypatch.setenv("WF_DATABASE_PATH", str(tmp_path / "api.sqlite3"))
     with TestClient(main.app) as client:
         yield client, private_key, seeded
@@ -825,3 +830,28 @@ def test_internal_event_projection_is_atomic_and_idempotent(pg, oidc_rig):
             with conn.transaction():
                 conn.execute("SET LOCAL ROLE wf_event_projector")
                 conn.execute("SELECT * FROM worthkind_flow.guest_cases")
+
+
+def test_operator_onboarding_and_guest_intake_switch(pg, oidc_rig):
+    from hotel_provisioner import run_command
+    client, key, source = oidc_rig
+    dsn = make_conninfo(os.environ["WF_TEST_POSTGRES_DSN"], user="wf_ci_provisioner", password="worthkind_ci_provisioner_only")
+    prop = run_command(dsn,"register",["New Hotel Ltd","hotel-new","New Hotel","Africa/Lagos","operator-test"])
+    assert pg.execute("SELECT status FROM worthkind_flow.properties WHERE id=%s",(prop,)).fetchone()[0]=="pending"
+    run_command(dsn,"identity",["idp:hotel-new-staff","operator-test","verified-evidence-001"])
+    run_command(dsn,"activate",["hotel-new","idp:hotel-new-owner","operator-test","verified-evidence-002"])
+    owner=auth_header(signed_token(key,"idp:hotel-new-owner"))
+    other=auth_header(signed_token(key,"idp:hotel-b-reception"))
+    path="/api/v1/properties/hotel-new/staff/settings"
+    assert client.get(path,headers=other).status_code==403
+    response=client.get(path,headers=owner)
+    assert response.status_code==200, response.text
+    assert response.json()=={"guest_enquiries_enabled":True,"ai_enabled":False,"revision":1}
+    assert client.put(path,json={"revision":1,"guest_enquiries_enabled":False},headers=owner).status_code==200
+    assert client.put(path,json={"revision":1,"guest_enquiries_enabled":True},headers=owner).status_code==409
+    guest={"request_key":"new-hotel-request-001","kind":"booking","name":"Test Guest","contact":"test@example.invalid","details":"A test enquiry for the new hotel.","receipt_token":"x"*43}
+    url="/api/v1/properties/hotel-new/enquiries"
+    assert client.post(url,json=guest).status_code==404
+    assert client.put(path,json={"revision":2,"guest_enquiries_enabled":True},headers=owner).status_code==200
+    assert client.post(url,json=guest).status_code==201
+    assert pg.execute("SELECT count(*) FROM worthkind_flow.property_admin_events WHERE property_id=%s",(prop,)).fetchone()[0]==4
