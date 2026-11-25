@@ -30,6 +30,16 @@ class Confirm(BaseModel):
     payment_method:Literal["pay_at_property"]
     accept_terms:Literal[True]
 
+class Change(BaseModel):
+    revision:int=Field(ge=1)
+    arrival:date
+    departure:date
+    rate_id:UUID
+    expected_total_minor:int=Field(ge=1,le=900000000000000)
+    expected_currency:str=Field(pattern=r"^[A-Z]{3}$")
+    policy_reference:str=Field(min_length=8,max_length=240)
+    accept_terms:Literal[True]
+
 class Cancel(BaseModel):
     revision:int=Field(ge=1)
     reason:str=Field(min_length=8,max_length=240)
@@ -70,3 +80,19 @@ def install_native_booking_routes(app):
     def cancel(slug:str,booking_id:UUID,body:Cancel,authorization:str|None=Header(None)):
         return command("SELECT worthkind_flow.cancel_native_booking(%s,%s,%s,%s,%s)",
         (actor(authorization),slug,booking_id,body.revision,body.reason))[0]
+
+
+    @app.get(base+"/native-availability",dependencies=[Depends(enforce_guest_quota)])
+    def availability(slug:str,arrival:date,departure:date):
+        if not 1<=(departure-arrival).days<=90:
+            raise HTTPException(422,"Invalid stay range")
+        rows=command("SELECT worthkind_flow.native_availability(%s,%s,%s)",(slug,arrival,departure),public=True)[0]
+        return {"room_types":rows,"source":"native_inventory","inventory_held":False}
+
+    @app.post(guest+"/{booking_id}/change-dates",dependencies=[Depends(enforce_guest_quota)])
+    def change(slug:str,case_id:UUID,booking_id:UUID,body:Change,x_receipt_token:str|None=Header(None)):
+        if not 1<=(body.departure-body.arrival).days<=90:
+            raise HTTPException(422,"Invalid stay range")
+        r=command("SELECT worthkind_flow.change_native_booking(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+        (slug,case_id,proof(x_receipt_token),booking_id,body.revision,body.arrival,body.departure,body.rate_id,body.expected_total_minor,body.expected_currency,body.policy_reference),guest=True)[0]
+        return {"booking":r,"source":"native_inventory","payment_method":"pay_at_property"}
