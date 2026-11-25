@@ -178,7 +178,7 @@ def install_pms_write_routes(app):
     def rate(slug:str,body:RateUpdate,authorization:str|None=Header(None)):
         subject=actor(authorization)
         cfg=enabled(subject,slug,rate=True)
-        if body.rate_id not in cfg.get("allowed_rate_ids",[]) or not 0<=(body.end-body.start).days<=90 or body.start<date.today():
+        if not isinstance(cfg.get("allowed_rate_ids"),list) or body.rate_id not in cfg["allowed_rate_ids"] or not 0<=(body.end-body.start).days<=90 or body.start<date.today():
             raise HTTPException(422,"Rate or interval unavailable")
         digits=cfg.get("minor_digits")
         if type(digits) is not int or not 0<=digits<=3:
@@ -196,3 +196,28 @@ def install_pms_write_routes(app):
         except HTTPException:
             finish(subject,slug,job,"unknown",provider_job=provider_job,result={"requires_provider_review":True})
             raise
+
+
+    @app.post(base+"/rate-commands/{command_id}/verify")
+    def verify_rate(slug:str,command_id:UUID,authorization:str|None=Header(None)):
+        subject=actor(authorization)
+        cfg=config(subject,slug)
+        job=command("SELECT worthkind_flow.get_pms_command(%s,%s,%s)",(subject,slug,command_id))[0]
+        if job["operation"]!="rate_update" or job["account_alias"]!=cfg["alias"] or job["external_property_id"]!=cfg["property_id"]:
+            raise HTTPException(409,"Rate job account mismatch")
+        provider_id=job["provider_job_id"]
+        if not provider_id:
+            raise HTTPException(409,"Provider job ID unknown; investigate before resubmission")
+        if job["state"] in ("verified","error"):
+            return {"command":job,"ota_delivery_verified":False}
+        rows=get(cfg,"getRateJobs",{"jobReferenceID":provider_id})
+        if not isinstance(rows,list):
+            raise HTTPException(502,"Unsupported rate job response")
+        matching=[r for r in rows if isinstance(r,dict) and str(r.get("jobReferenceID"))==provider_id]
+        if len(matching)!=1:
+            raise HTTPException(503,"Rate job status unavailable")
+        status=matching[0].get("status")
+        if status not in ("completed","error","in_progress"):
+            raise HTTPException(502,"Unknown rate job state")
+        state={"completed":"verified","error":"error","in_progress":"accepted"}[status]
+        return {"command":finish(subject,slug,job,state,provider_job=provider_id,result={"provider_job_status":status}),"ota_delivery_verified":False}
