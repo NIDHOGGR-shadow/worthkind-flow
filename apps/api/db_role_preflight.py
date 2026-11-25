@@ -6,7 +6,7 @@ import psycopg
 
 ROLES = ("wf_auth_lookup","wf_document_store","wf_event_projector","wf_guest_api",
          "wf_guest_quota","wf_hotel_provisioner","wf_property_config","wf_staff_commands",
-         "wf_staff_lifecycle","wf_staff_runtime")
+         "wf_staff_lifecycle","wf_staff_runtime","wf_operations","wf_public_content","wf_payment_provider")
 
 def inspect(conn):
     result={}
