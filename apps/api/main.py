@@ -8,7 +8,7 @@ from pathlib import Path
 import re
 import secrets
 import sqlite3
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
@@ -19,6 +19,15 @@ from operations import install_operations_routes
 from sla import install_sla_routes
 from delivery_contract import create_delivery_tables, install_delivery_routes
 from knowledge import create_knowledge_tables, install_knowledge_routes, identify_knowledge_key
+
+from guest_postgres import (
+    submit_guest_enquiry, guest_case_status, GuestStorageNotConfigured,
+    GuestRecordUnavailable, GuestRequestConflict, GuestStorageError,
+)
+from staff_oidc import (
+    verified_provider_subject, staff_case_operation, StaffTokenRejected,
+    StaffAuthConfigurationError, StaffPermissionDenied, StaffStorageUnavailable,
+)
 
 from runtime_boundary import StaffConfigurationError, sqlite_ready, staff_key_matches, validate_environment
 
@@ -394,3 +403,93 @@ install_operations_routes(app, database, property_id, require_staff)
 install_sla_routes(app, database, property_id, require_staff)
 install_delivery_routes(app, database, property_id, require_staff)
 install_knowledge_routes(app, database, property_id, require_staff)
+
+
+def _verified_staff_subject(authorization: str | None) -> str:
+    try:
+        return verified_provider_subject(authorization)
+    except StaffTokenRejected as error:
+        raise HTTPException(401, str(error), headers={"WWW-Authenticate": "Bearer"}) from error
+    except StaffAuthConfigurationError as error:
+        raise HTTPException(503, "Staff sign-in not configured") from error
+
+
+def _staff_db_action(subject: str, slug: str, *, action: str, case_id: UUID | None = None, reply_message: str | None = None):
+    try:
+        return staff_case_operation(subject, slug, action=action, case_id=case_id, reply_message=reply_message)
+    except StaffAuthConfigurationError as error:
+        raise HTTPException(503, "Hotel staff database not configured") from error
+    except StaffPermissionDenied as error:
+        raise HTTPException(403, "Staff action unavailable") from error
+    except StaffStorageUnavailable as error:
+        raise HTTPException(503, "Hotel staff data temporarily unavailable") from error
+    except (GuestStorageNotConfigured, GuestStorageError) as error:
+        raise HTTPException(503, "Hotel guest encryption service unavailable") from error
+
+
+@app.get("/api/v1/properties/{slug}/staff/cases")
+def verified_staff_cases_v1(slug: str, authorization: str | None = Header(None)):
+    """Trusted OIDC + PostgreSQL RLS; authorized hotel staff can access encrypted guest details."""
+    subject = _verified_staff_subject(authorization)
+    return _staff_db_action(subject, slug, action="case:read")
+
+
+@app.post("/api/v1/properties/{slug}/staff/cases/{case_id}/claim")
+def verified_staff_claim_v1(
+    slug: str, case_id: UUID, authorization: str | None = Header(None)
+):
+    """Atomic staff claim. Queued audit/outbox is not delivered notification."""
+    subject = _verified_staff_subject(authorization)
+    return _staff_db_action(subject, slug, action="case:claim", case_id=case_id)
+
+
+class PostgreSQLGuestEnquiry(EnquiryInput):
+    # A client-generated secret preserves private status proof across lost responses.
+    receipt_token: str = Field(
+        min_length=32, max_length=128, pattern=r"^[A-Za-z0-9_-]+$"
+    )
+
+
+@app.post("/api/v1/properties/{slug}/enquiries", status_code=201)
+def postgres_guest_enquiry_v1(slug: str, data: PostgreSQLGuestEnquiry):
+    """Development-only encrypted guest request; never a booked hotel room."""
+    try:
+        return submit_guest_enquiry(slug, data.model_dump())
+    except GuestStorageNotConfigured as error:
+        raise HTTPException(503, "Guest enquiry storage not configured") from error
+    except GuestRequestConflict as error:
+        raise HTTPException(409, str(error)) from error
+    except GuestRecordUnavailable as error:
+        raise HTTPException(404, "Hotel unavailable") from error
+    except GuestStorageError as error:
+        raise HTTPException(503, "Guest enquiry unavailable") from error
+
+
+@app.get("/api/v1/properties/{slug}/enquiries/{case_id}")
+def postgres_guest_status_v1(
+    slug: str, case_id: UUID, x_receipt_token: str | None = Header(None)
+):
+    if not x_receipt_token or not 32 <= len(x_receipt_token) <= 128 or not re.fullmatch(
+        r"[A-Za-z0-9_-]+", x_receipt_token
+    ):
+        raise HTTPException(404, "Case not found")
+    try:
+        return guest_case_status(slug, case_id, x_receipt_token)
+    except GuestStorageNotConfigured as error:
+        raise HTTPException(503, "Guest enquiry storage not configured") from error
+    except GuestRecordUnavailable as error:
+        raise HTTPException(404, "Case not found") from error
+    except GuestStorageError as error:
+        raise HTTPException(503, "Guest status temporarily unavailable") from error
+
+
+@app.post("/api/v1/properties/{slug}/staff/cases/{case_id}/respond")
+def postgres_staff_reply_v1(
+    slug: str, case_id: UUID, body: StaffResponse,
+    authorization: str | None = Header(None),
+):
+    subject = _verified_staff_subject(authorization)
+    return _staff_db_action(
+        subject, slug, action="case:reply",
+        case_id=case_id, reply_message=body.message,
+    )
