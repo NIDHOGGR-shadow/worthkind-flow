@@ -24,7 +24,7 @@ import pytest
 
 MIGRATIONS = [
     Path(__file__).resolve().parents[3] / "db" / "migrations" / name
-    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql", "008_hotel_onboarding_settings.sql", "009_identity_provisioning.sql", "010_guest_quota.sql", "011_private_documents.sql", "012_operational_tickets.sql", "013_content_catalog.sql", "014_rooms_rates.sql", "015_rate_lookup_qualification.sql", "016_inventory_procurement.sql", "017_dining_kitchen.sql", "018_menu_lock_qualification.sql", "019_department_roles.sql", "020_staff_shifts.sql")
+    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql", "008_hotel_onboarding_settings.sql", "009_identity_provisioning.sql", "010_guest_quota.sql", "011_private_documents.sql", "012_operational_tickets.sql", "013_content_catalog.sql", "014_rooms_rates.sql", "015_rate_lookup_qualification.sql", "016_inventory_procurement.sql", "017_dining_kitchen.sql", "018_menu_lock_qualification.sql", "019_department_roles.sql", "020_staff_shifts.sql", "021_guest_preferences_feedback.sql", "022_reservation_intents.sql", "023_hotel_finance.sql")
 ]
 
 
@@ -1041,3 +1041,33 @@ def test_staff_schedule_permissions_and_overlap(pg, oidc_rig, monkeypatch):
     assert len(report["members"])==1 and len(report["shifts"])==1
     assert client.post(base+"/shifts/"+sid+"/cancel",headers=reception).status_code==403
     assert client.post(base+"/shifts/"+sid+"/cancel",headers=owner).status_code==200
+
+
+def test_guest_receipt_preferences_and_reservation_intent(pg, oidc_rig, monkeypatch):
+    from datetime import date,timedelta
+    client,key,source=oidc_rig
+    monkeypatch.setenv("WF_OPERATIONS_POSTGRES_DSN",os.environ["WF_STAFF_POSTGRES_DSN"])
+    token="g"*43
+    base="/api/v1/properties/hotel-a"
+    payload={"request_key":"booking-stay-test","kind":"booking","name":"Test Guest","contact":"test@example.invalid","details":"Request a two night stay","receipt_token":token}
+    created=client.post(base+"/enquiries",json=payload)
+    assert created.status_code==201,created.text
+    case=created.json()["case_id"]
+    g=base+"/guest/cases/"+case
+    proof={"x-receipt-token":token}
+    assert client.put(g+"/preferences",json={"language":"English","revision":0},headers={"x-receipt-token":"x"*43}).status_code==404
+    assert client.put(g+"/preferences",json={"language":"English","revision":0},headers=proof).status_code==200
+    assert client.get(g+"/preferences",headers=proof).json()["preferences"]["language"]=="English"
+    assert client.post(g+"/consent",json={"purpose":"marketing","granted":False,"policy_version":"test-policy"},headers=proof).status_code==201
+    arrival=date.today()+timedelta(days=10)
+    stay={"request_key":"stay-test-001","arrival":arrival.isoformat(),"departure":(arrival+timedelta(days=2)).isoformat(),"adults":2}
+    r=client.post(g+"/reservation-intents",json=stay,headers=proof)
+    assert r.status_code==201,r.text
+    assert r.json()["booking_confirmed"] is False
+    iid=r.json()["id"]
+    assert client.post(g+"/reservation-intents",json=stay,headers=proof).json()["duplicate"] is True
+    owner=auth_header(signed_token(key,"idp:hotel-a-owner"))
+    review=base+"/staff/reservation-intents/"+iid+"/review"
+    assert client.post(review,json={"action":"review"},headers=owner).json()["state"]=="under_review"
+    assert client.post(g+"/reservation-intents/"+iid+"/withdraw",headers=proof).json()["state"]=="withdrawn"
+    assert client.post(g+"/feedback",json={"rating":4,"comment":"Test feedback"},headers=proof).status_code==409
