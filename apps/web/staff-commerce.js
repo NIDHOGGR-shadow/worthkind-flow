@@ -6,9 +6,9 @@ function initStaffCommerce({session,ctx,run,mutate}){
  const human=s=>String(s??"").replaceAll("_"," ");
  const money=r=>r.currency+" "+(r.amount_minor??r.total_minor??r.price_minor)+" minor units";
  const key=()=>Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,"0")).join("");
- const sections=["reservation-queue","pms-availability-result","pms-reservation-result","dining-queue","order-menu","events-queue","finance-invoices","checkout-result","finance-payments","finance-refunds","finance-exceptions"];
+ const sections=["reservation-queue","pms-availability-result","pms-reservation-result","dining-queue","order-menu","events-queue","finance-invoices","checkout-result","finance-payments","finance-refunds","finance-exceptions","management-catalog","channel-result"];
  let menu=[],pending=null;
- function clear(){menu=[];pending=null;for(const id of sections)el(id).replaceChildren();for(const id of ["pms-availability","pms-lookup","dining-form","invoice-form"])el(id).reset();controls();}
+ function clear(){menu=[];pending=null;for(const id of sections)el(id).replaceChildren();for(const id of ["pms-availability","pms-lookup","dining-form","invoice-form","channel-form"])el(id).reset();for(const form of el("catalog-management-forms").querySelectorAll("form"))form.reset();controls();}
  function controls(){el("dining-fields").disabled=ctx.busy||!!pending;el("dining-submit").textContent=pending?"Retry unchanged order":"Record order";el("dining-discard").hidden=!pending;el("load-order-menu").disabled=ctx.busy||!!pending;}
  function card(root,title,lines){const n=node("article");n.className="staff-record";n.append(node("h3",title));for(const line of lines)if(line)n.append(node("p",line));root.append(n);return n;}
  function button(parent,label,fn){const b=node("button",label);b.className="button secondary";b.type="button";b.addEventListener("click",fn);parent.append(b);return b;}
@@ -38,5 +38,24 @@ function initStaffCommerce({session,ctx,run,mutate}){
  async function finance(){for(const k of ["invoices","payments","refunds","exceptions"])el("finance-"+k).replaceChildren();el("checkout-result").replaceChildren();return run(s=>api.finance(s),renderFinance);}
  el("load-finance").addEventListener("click",finance);
  el("invoice-form").addEventListener("submit",async e=>{e.preventDefault();if(ctx.busy)return;const id=el("invoice-order").value.trim();await act(()=>api.invoice(ctx.slug,id),finance,"Dining invoice recorded.","Issue an invoice for this served order?")();});
+ el("channel-form").addEventListener("submit",e=>{e.preventDefault();if(ctx.busy)return;load("channel-result",s=>api.channels(s,el("channel-start").value,el("channel-end").value,Number(el("channel-page").value)),d=>{const root=el("channel-result");root.append(node("p","Cloudbeds · Page "+d.page+" · Retrieved "+d.retrieved_at));if(!d.reservations.length)root.append(node("p","No reservations returned on this page."));for(const r of d.reservations)card(root,human(r.state),[r.reservation_id,r.arrival+" to "+r.departure,r.source_name||"Source not reported"]);say("staff-message","Read-only channel reservations retrieved.");});});
+ function managementCatalog(){return load("management-catalog",s=>api.catalog(s),d=>{const root=el("management-catalog");for(const [label,rows] of [["Published rooms",d.rooms],["Available menu",d.menu],["Venues",d.venues]]){root.append(node("h3",label));if(!rows.length)root.append(node("p","No published records."));for(const r of rows)card(root,r.name,[r.id,r.code?"Code "+r.code:"",r.max_guests?"Maximum guests "+r.max_guests:"",r.capacity?"Capacity "+r.capacity:"",r.currency?money(r):""]);}say("staff-message","Published catalog loaded; revisions are not included in the public catalog.");});}
+ el("load-management-catalog").addEventListener("click",managementCatalog);
+ const field=(name,label,type="text",max=160,extra={})=>({name,label,type,max,...extra});
+ const revision=field("revision","Current revision (0 for new)","number",0,{min:0,value:0});
+ const currency=field("currency","Currency code","text",3,{value:"NGN"});
+ const price=(name)=>field(name,"Amount in minor units","number",0,{min:0,maxValue:1000000000000});
+ const defs=[
+ ["Room type",[field("code","Room type code","text",40),field("name","Room type name","text",100),field("description","Description","textarea",2000,{optional:true}),field("max_guests","Maximum guests","number",0,{min:1,maxValue:30,value:2}),field("published","Publish room type","checkbox"),revision],(s,b)=>api.roomType(s,b)],
+ ["Physical room",[field("room_type_id","Room type ID","text",36),field("label","Room label","text",40)],(s,b)=>api.createRoom(s,b)],
+ ["Display rate",[field("room_type_id","Room type ID","text",36),field("code","Rate code","text",40),currency,price("amount_minor"),field("start_date","Start","date"),field("end_date","End","date"),revision],(s,b)=>api.displayRate(s,b)],
+ ["Menu item",[field("code","Menu code","text",60),field("name","Menu item name","text",160),field("description","Description","textarea",1000,{optional:true}),price("price_minor"),currency,field("available","Make available","checkbox"),revision],(s,b)=>api.saveMenu(s,b)],
+ ["Venue",[field("name","Venue name","text",120),field("capacity","Capacity","number",0,{min:1,maxValue:100000})],(s,b)=>api.createVenue(s,b)]
+ ];
+ for(const [title,fields,op] of defs){
+   const box=node("details"),summary=node("summary","Manage "+title.toLowerCase()),form=node("form");box.append(summary,form);const controlsMap=new Map();
+   for(const f of fields){const label=node("label",f.label),input=node(f.type==="textarea"?"textarea":"input");if(f.type!=="textarea")input.type=f.type;if(f.max)input.maxLength=f.max;if(f.min!==undefined)input.min=String(f.min);if(f.maxValue!==undefined)input.max=String(f.maxValue);if(f.value!==undefined){input.value=String(f.value);input.defaultValue=String(f.value);}if(f.type!=="checkbox")input.required=!f.optional;label.append(input);form.append(label);controlsMap.set(f.name,input);}
+   const submit=node("button","Save "+title.toLowerCase());submit.type="submit";submit.className="button primary";form.append(submit);form.addEventListener("submit",async e=>{e.preventDefault();if(ctx.busy)return;const body={};for(const f of fields){const input=controlsMap.get(f.name);body[f.name]=f.type==="checkbox"?input.checked:f.type==="number"?Number(input.value):input.value.trim();}if(!confirm("Save "+title.toLowerCase()+" in "+ctx.slug+"?"))return;await run(s=>op(s,body),d=>{say("staff-message",title+" saved by server. ID "+d.id+(d.revision!==undefined?" · Revision "+d.revision:""));if(d.revision!==undefined){const rev=controlsMap.get("revision");if(rev)rev.value=String(d.revision);}});});el("catalog-management-forms").append(box);
+ }
  return {clear,controls,get pending(){return !!pending;}};
 }
