@@ -22,6 +22,8 @@ OPTIONAL_PROVIDER_ROLES = (
     ("WF_PAYMENT_PROVIDER_POSTGRES_DSN", "wf_payment_provider"),
     ("WF_POS_PROVIDER_POSTGRES_DSN", "wf_pos_provider"),
     ("WF_PMS_PROVIDER_POSTGRES_DSN", "wf_pms_provider"),
+    ("WF_AI_GATEWAY_POSTGRES_DSN", "wf_ai_gateway"),
+    ("WF_AI_POLICY_POSTGRES_DSN", "wf_ai_policy"),
 )
 
 
