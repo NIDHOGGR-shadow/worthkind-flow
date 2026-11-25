@@ -192,3 +192,19 @@ def install_room_pg_routes(app):
         r=command("SELECT * FROM worthkind_flow.save_display_rate(%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                   (actor(authorization),slug,body.room_type_id,body.code,body.currency,body.amount_minor,body.start_date,body.end_date,body.revision))
         return {"id":str(r[0]),"revision":r[1],"rates_binding":False}
+
+
+class CaseControl(BaseModel):
+    action:Literal["transfer","escalate","resolve"]
+    target_membership_id:UUID|None=None
+    reason:str=Field(min_length=8,max_length=1500)
+
+
+def install_reception_controls(app):
+    @app.post("/api/v1/properties/{slug}/staff/cases/{case_id}/control")
+    def control(slug:str,case_id:UUID,body:CaseControl,authorization:str|None=Header(None)):
+        subject=actor(authorization)
+        reason=encrypt({"reason":body.reason},f"wf:case-control:{slug}:{case_id}")
+        r=command("SELECT worthkind_flow.control_reception_case(%s,%s,%s,%s,%s,%s)",
+                  (subject,slug,case_id,body.action,body.target_membership_id,reason))
+        return {"case_id":str(case_id),"state":r[0],"notifications_live":False}
