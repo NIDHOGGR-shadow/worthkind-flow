@@ -47,5 +47,9 @@ if (typeof module !== "undefined" && module.exports) {
   const name=document.querySelector("#property-name");
   const status=document.querySelector("#property-capability");
   const load=document.querySelector("#refresh-property");
-  if(select&&name&&status&&load) createPropertyController({select,name,status,load,fetcher:window.fetch.bind(window)}).refresh();
+  if(select&&name&&status&&load) {
+    const context=createPropertyController({select,name,status,load,fetcher:window.fetch.bind(window)});
+    select.form?.addEventListener("reset",()=>queueMicrotask(context.refresh));
+    context.refresh();
+  }
 }
