@@ -162,11 +162,11 @@ BEGIN
  v_property:=worthkind_flow.verified_guest_case(p_slug,p_case,p_hash);
  PERFORM 1 FROM worthkind_flow.properties WHERE id=v_property FOR UPDATE;
  SELECT x.* INTO b FROM worthkind_flow.native_bookings x JOIN worthkind_flow.reservation_intents r ON r.id=x.intent_id AND r.property_id=x.property_id
- WHERE x.id=p_booking AND x.property_id=v_property AND r.case_id=p_case AND r.state='under_review' FOR UPDATE OF x;
+ WHERE x.id=p_booking AND x.property_id=v_property AND r.case_id=p_case AND r.state='under_review' FOR UPDATE OF x,r;
  IF NOT FOUND THEN RAISE EXCEPTION 'Booking unavailable' USING ERRCODE='P0002'; END IF;
  IF p_expected_total IS DISTINCT FROM b.total_minor THEN RAISE EXCEPTION 'Quote mismatch' USING ERRCODE='23514'; END IF;
  IF b.state='confirmed' THEN RETURN to_jsonb(b)-'created_by'-'property_id'; END IF;
- IF b.state<>'held' OR b.expires_at<=now() OR NOT EXISTS(SELECT 1 FROM worthkind_flow.native_booking_accounts WHERE property_id=v_property AND enabled)
+ IF b.state<>'held' OR b.expires_at<=now() OR b.arrival<(SELECT (now() AT TIME ZONE p.time_zone)::date FROM worthkind_flow.properties p WHERE p.id=v_property) OR NOT EXISTS(SELECT 1 FROM worthkind_flow.native_booking_accounts WHERE property_id=v_property AND enabled)
  OR EXISTS(SELECT 1 FROM worthkind_flow.booking_room_nights n JOIN worthkind_flow.hotel_rooms h ON h.id=n.room_id AND h.property_id=n.property_id
  WHERE n.booking_id=b.id AND h.operational_state NOT IN ('clean','dirty','inspecting')) THEN
  RAISE EXCEPTION 'Hold unavailable' USING ERRCODE='23514'; END IF;
