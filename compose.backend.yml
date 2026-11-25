@@ -24,6 +24,7 @@ services:
       WF_PAYMENT_PROVIDER_POSTGRES_DSN: ${WF_PAYMENT_PROVIDER_POSTGRES_DSN:-}
       WF_PAYSTACK_ACCOUNTS_JSON: ${WF_PAYSTACK_ACCOUNTS_JSON:-}
       WF_PAYSTACK_LIVE_ENABLED: ${WF_PAYSTACK_LIVE_ENABLED:-0}
+      WF_CLOUDBEDS_WRITES_ENABLED: ${WF_CLOUDBEDS_WRITES_ENABLED:-0}
       WF_CLOUDBEDS_ACCOUNTS_JSON: ${WF_CLOUDBEDS_ACCOUNTS_JSON:-}
       WF_PMS_PROVIDER_POSTGRES_DSN: ${WF_PMS_PROVIDER_POSTGRES_DSN:-}
       WF_POS_PROVIDER_POSTGRES_DSN: ${WF_POS_PROVIDER_POSTGRES_DSN:-}
@@ -50,6 +51,25 @@ services:
     command: ["python","event_projector.py"]
     environment:
       WF_EVENT_PROJECTOR_POSTGRES_DSN: ${WF_EVENT_PROJECTOR_POSTGRES_DSN:?required}
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  pos-sync:
+    profiles: ["pos-sync"]
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    command: ["python","pos_sync_worker.py"]
+    environment:
+      WF_POS_SYNC_ENABLED: '1'
+      WF_POS_SYNC_POSTGRES_DSN: ${WF_POS_SYNC_POSTGRES_DSN:-}
+      WF_LOYVERSE_ACCOUNTS_JSON: ${WF_LOYVERSE_ACCOUNTS_JSON:-}
     read_only: true
     tmpfs:
       - /tmp
