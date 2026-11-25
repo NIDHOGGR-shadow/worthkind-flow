@@ -90,6 +90,19 @@ def install_operations_pg_routes(app):
             "assignee":str(r[5]) if r[5] else None,"due_at":r[6].isoformat(),"overdue":r[8],
             **decrypt(r[7],f"wf:ticket:{slug}:{r[1]}")} for r in rows]}
 
+    @app.get("/api/v1/properties/{slug}/staff/tickets/{ticket_id}")
+    def ticket_detail(slug:str,ticket_id:UUID,authorization:str|None=Header(None)):
+        subject=actor(authorization)
+        r=command("SELECT * FROM worthkind_flow.ticket_detail(%s,%s,%s)",(subject,slug,ticket_id))
+        history=command("SELECT * FROM worthkind_flow.ticket_history(%s,%s,%s)",(subject,slug,ticket_id),many=True)
+        return {"id":str(r[0]),"category":r[2],"priority":r[3],"status":r[4],
+                "assignee":str(r[5]) if r[5] else None,"due_at":r[6].isoformat(),
+                "origin_case_id":str(r[8]) if r[8] else None,
+                **decrypt(r[7],f"wf:ticket:{slug}:{r[1]}"),
+                "history":[{"actor":str(h[0]) if h[0] else None,"action":h[1],
+                            "note":decrypt(h[2],f"wf:ticket-note:{slug}:{ticket_id}").get("note") if h[2] else None,
+                            "created_at":h[3].isoformat()} for h in history]}
+
     @app.post("/api/v1/properties/{slug}/staff/tickets/{ticket_id}/transition")
     def transition(slug:str,ticket_id:UUID,body:TicketChange,authorization:str|None=Header(None)):
         subject=actor(authorization)
