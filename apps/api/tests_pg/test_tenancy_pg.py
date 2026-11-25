@@ -24,7 +24,7 @@ import pytest
 
 MIGRATIONS = [
     Path(__file__).resolve().parents[3] / "db" / "migrations" / name
-    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql", "008_hotel_onboarding_settings.sql", "009_identity_provisioning.sql", "010_guest_quota.sql", "011_private_documents.sql")
+    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql", "008_hotel_onboarding_settings.sql", "009_identity_provisioning.sql", "010_guest_quota.sql", "011_private_documents.sql", "012_operational_tickets.sql")
 ]
 
 
@@ -61,7 +61,7 @@ def pg():
         conn.execute("GRANT wf_property_config TO wf_ci_config")
         conn.execute("CREATE ROLE wf_ci_quota LOGIN NOINHERIT PASSWORD 'worthkind_ci_quota_only'")
         conn.execute("GRANT wf_guest_quota TO wf_ci_quota")
-        conn.execute("GRANT wf_document_store TO wf_ci_staff")
+        conn.execute("GRANT wf_document_store,wf_operations TO wf_ci_staff")
         yield conn
 
 
@@ -888,3 +888,25 @@ def test_private_document_database_boundary(pg, oidc_rig, monkeypatch):
     assert client.get(path+"/"+doc,headers=other).status_code==403
     stored=pg.execute("SELECT ciphertext FROM worthkind_flow.private_documents WHERE id=%s",(doc,)).fetchone()[0]
     assert payload not in stored
+
+
+def test_postgres_ticket_department_boundary(pg, oidc_rig, monkeypatch):
+    client,key,source=oidc_rig
+    monkeypatch.setenv("WF_OPERATIONS_POSTGRES_DSN",os.environ["WF_STAFF_POSTGRES_DSN"])
+    owner=auth_header(signed_token(key,"idp:hotel-a-owner"))
+    housekeeping=auth_header(signed_token(key,"idp:hotel-a-housekeeper"))
+    outsider=auth_header(signed_token(key,"idp:hotel-b-reception"))
+    base="/api/v1/properties/hotel-a/staff/tickets"
+    body={"request_key":"test-ticket-123","category":"housekeeping","priority":"high","subject":"Room service task","description":"Prepare a room for guest arrival"}
+    r=client.post(base,json=body,headers=owner)
+    assert r.status_code==201,r.text
+    tid=r.json()["ticket_id"]
+    assert client.post(base,json=body,headers=owner).json()["duplicate"] is True
+    assert client.get(base,headers=outsider).status_code==403
+    assert client.get(base,headers=housekeeping).json()["tickets"][0]["id"]==tid
+    route=base+"/"+tid+"/transition"
+    assert client.post(route,json={"action":"claim"},headers=housekeeping).status_code==200
+    assert client.post(route,json={"action":"start"},headers=owner).status_code==409
+    assert client.post(route,json={"action":"start"},headers=housekeeping).status_code==200
+    assert client.post(route,json={"action":"resolve","note":"Task completed"},headers=housekeeping).json()["status"]=="resolved"
+    assert pg.execute("SELECT count(*) FROM worthkind_flow.ticket_events WHERE ticket_id=%s",(tid,)).fetchone()[0]==4
