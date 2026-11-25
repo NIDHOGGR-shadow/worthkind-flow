@@ -60,7 +60,7 @@
     journey.reset();say("v1-submit-status","Unconfirmed request discarded locally. This did not cancel a server record.");controls();
   });
   el("v1-new").addEventListener("click",()=>{
-    if(journey.busy||!journey.active)return;
+    if(journey.busy||commerce.busy||!journey.active)return;
     if(commerce.pending&&!window.confirm("An unconfirmed stay or venue request may exist. Starting over discards its local retry proof. Continue?"))return;
     if(!window.confirm("Have you saved the private receipt? Starting over removes it from this page."))return;
     journey.reset();commerce.reset();el("v1-form").reset();el("v1-recover-form").reset();el("v1-track").hidden=true;el("v1-receipt").hidden=true;say("v1-receipt","");say("v1-reply","");say("v1-case-status","");say("v1-recover-status","");say("v1-submit-status","Ready for a new request.");controls();el("v1-hotel").focus();
