@@ -511,3 +511,6 @@ install_document_routes(app)
 
 from operations_pg import install_operations_pg_routes
 install_operations_pg_routes(app)
+
+from operations_pg import install_content_pg_routes
+install_content_pg_routes(app)
