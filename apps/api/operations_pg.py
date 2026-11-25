@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 from typing import Literal
+from datetime import date
 from uuid import UUID
 import psycopg
 from psycopg import errors
@@ -49,7 +50,7 @@ def command(query,params,*,many=False,public=False):
         raise HTTPException(403,"Operations access denied") from None
     except errors.NoDataFound:
         raise HTTPException(404,"Record unavailable") from None
-    except (errors.UniqueViolation,errors.CheckViolation):
+    except (errors.UniqueViolation,errors.CheckViolation,errors.SerializationFailure):
         raise HTTPException(409,"Operation conflicts with current state") from None
     except psycopg.Error:
         raise HTTPException(503,"Operations database unavailable") from None
@@ -126,3 +127,66 @@ def install_content_pg_routes(app):
     def decide(slug:str,content_id:UUID,body:ContentDecision,authorization:str|None=Header(None)):
         row=command("SELECT worthkind_flow.decide_content(%s,%s,%s,%s)",(actor(authorization),slug,content_id,body.action))
         return {"id":str(content_id),"state":row[0]}
+
+
+class RoomTypeSave(BaseModel):
+    code:str=Field(min_length=2,max_length=40,pattern=r"^[A-Za-z0-9_-]+$")
+    name:str=Field(min_length=2,max_length=100)
+    description:str=Field(default="",max_length=2000)
+    max_guests:int=Field(ge=1,le=30)
+    published:bool=False
+    revision:int=Field(ge=0)
+
+class RoomCreate(BaseModel):
+    room_type_id:UUID
+    label:str=Field(min_length=1,max_length=40)
+
+class RoomState(BaseModel):
+    state:Literal["unknown","clean","dirty","inspecting","out_of_service"]
+    revision:int=Field(ge=1)
+
+class DisplayRate(BaseModel):
+    room_type_id:UUID
+    code:str=Field(min_length=2,max_length=40,pattern=r"^[A-Za-z0-9_-]+$")
+    currency:str=Field(pattern=r"^[A-Z]{3}$")
+    amount_minor:int=Field(ge=0,le=1000000000000)
+    start_date:date
+    end_date:date
+    revision:int=Field(ge=0)
+
+
+def install_room_pg_routes(app):
+    @app.get("/api/v1/properties/{slug}/rooms")
+    def catalog(slug:str):
+        rows=command("SELECT * FROM worthkind_flow.list_room_catalog(%s)",(slug,),many=True,public=True)
+        return {"rooms":[{"id":str(r[0]),"code":r[1],"name":r[2],"description":r[3],"max_guests":r[4],"display_rates":r[5]} for r in rows],
+                "live_availability":False,"rates_binding":False}
+
+    @app.put("/api/v1/properties/{slug}/staff/room-types")
+    def save_type(slug:str,body:RoomTypeSave,authorization:str|None=Header(None)):
+        r=command("SELECT * FROM worthkind_flow.manage_room_type(%s,%s,%s,%s,%s,%s,%s,%s)",
+                  (actor(authorization),slug,body.code,body.name,body.description,body.max_guests,body.published,body.revision))
+        return {"id":str(r[0]),"revision":r[1]}
+
+    @app.post("/api/v1/properties/{slug}/staff/rooms",status_code=201)
+    def create_room(slug:str,body:RoomCreate,authorization:str|None=Header(None)):
+        r=command("SELECT worthkind_flow.create_room(%s,%s,%s,%s)",(actor(authorization),slug,body.room_type_id,body.label))
+        return {"id":str(r[0]),"operational_state":"unknown"}
+
+    @app.get("/api/v1/properties/{slug}/staff/rooms")
+    def list_rooms(slug:str,authorization:str|None=Header(None)):
+        rows=command("SELECT * FROM worthkind_flow.list_internal_rooms(%s,%s)",(actor(authorization),slug),many=True)
+        return {"rooms":[{"id":str(r[0]),"label":r[1],"room_type_id":str(r[2]),"operational_state":r[3],"revision":r[4]} for r in rows],"occupancy_verified":False}
+
+    @app.put("/api/v1/properties/{slug}/staff/rooms/{room_id}/state")
+    def update_room(slug:str,room_id:UUID,body:RoomState,authorization:str|None=Header(None)):
+        r=command("SELECT worthkind_flow.change_room_state(%s,%s,%s,%s,%s)",(actor(authorization),slug,room_id,body.state,body.revision))
+        return {"id":str(room_id),"operational_state":body.state,"revision":r[0]}
+
+    @app.put("/api/v1/properties/{slug}/staff/display-rates")
+    def rate(slug:str,body:DisplayRate,authorization:str|None=Header(None)):
+        if body.end_date<=body.start_date:
+            raise HTTPException(422,"Invalid rate date range")
+        r=command("SELECT * FROM worthkind_flow.save_display_rate(%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                  (actor(authorization),slug,body.room_type_id,body.code,body.currency,body.amount_minor,body.start_date,body.end_date,body.revision))
+        return {"id":str(r[0]),"revision":r[1],"rates_binding":False}
