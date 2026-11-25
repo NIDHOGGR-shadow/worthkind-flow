@@ -132,7 +132,7 @@ BEGIN
  SELECT x.* INTO p FROM worthkind_flow.hotel_payment_intents x JOIN worthkind_flow.properties h ON h.id=x.property_id
  WHERE h.slug=p_slug AND x.reference=p_reference FOR UPDATE OF x;
  IF NOT FOUND THEN RAISE EXCEPTION 'Payment unavailable' USING ERRCODE='P0002'; END IF;
- IF p.account_alias<>p_alias OR p.mode<>p_mode OR p.amount_minor<>p_amount OR p.currency<>p_currency OR p_transaction IS NULL OR p_transaction<=0 OR
+ IF p.account_alias IS DISTINCT FROM p_alias OR p.mode IS DISTINCT FROM p_mode OR p.amount_minor IS DISTINCT FROM p_amount OR p.currency IS DISTINCT FROM p_currency OR p_transaction IS NULL OR p_transaction<=0 OR p_transaction<>trunc(p_transaction) OR p_transaction>18446744073709551615 OR
  (p.provider_transaction_id IS NOT NULL AND p.provider_transaction_id<>p_transaction) OR
  EXISTS(SELECT 1 FROM worthkind_flow.hotel_payment_intents x WHERE x.account_alias=p_alias AND x.mode=p_mode AND x.provider_transaction_id=p_transaction AND x.id<>p.id) THEN
  INSERT INTO worthkind_flow.finance_exceptions(property_id,payment_id,kind) VALUES(p.property_id,p.id,'verification_mismatch') ON CONFLICT DO NOTHING;
@@ -193,7 +193,7 @@ BEGIN
  SELECT * INTO p FROM worthkind_flow.hotel_payment_intents WHERE id=r.payment_id AND property_id=r.property_id FOR UPDATE;
  IF r.state='processed' THEN RETURN 'processed'; END IF;
  IF r.state NOT IN ('submitting','unknown','pending','processing','needs-attention','failed') THEN RAISE EXCEPTION 'Refund not submitted' USING ERRCODE='23514'; END IF;
- IF p_state NOT IN ('pending','processing','processed','failed','needs-attention') OR p_provider_id IS NULL OR p_provider_id<=0 OR p_transaction IS DISTINCT FROM p.provider_transaction_id OR
+ IF p_state NOT IN ('pending','processing','processed','failed','needs-attention') OR p_provider_id IS NULL OR p_provider_id<=0 OR p_provider_id<>trunc(p_provider_id) OR p_provider_id>18446744073709551615 OR p_transaction IS DISTINCT FROM p.provider_transaction_id OR
  p_mode IS DISTINCT FROM p.mode OR p_amount IS DISTINCT FROM r.amount_minor OR p_currency IS DISTINCT FROM p.currency OR
  (r.provider_refund_id IS NOT NULL AND r.provider_refund_id<>p_provider_id) THEN
  INSERT INTO worthkind_flow.finance_exceptions(property_id,payment_id,kind) VALUES(p.property_id,p.id,'refund_unknown') ON CONFLICT DO NOTHING;
@@ -233,4 +233,31 @@ GRANT EXECUTE ON FUNCTION worthkind_flow.issue_dining_invoice(text,text,uuid),wo
 GRANT EXECUTE ON FUNCTION worthkind_flow.payment_checkout_result(text,text,text,boolean),worthkind_flow.provider_payment_lookup(text,text),
  worthkind_flow.record_verified_payment(text,text,text,text,numeric,bigint,text),
  worthkind_flow.record_refund_result(text,uuid,numeric,numeric,text,bigint,text,text) TO wf_payment_provider;
+
+CREATE FUNCTION worthkind_flow.staff_payment_lookup(p_subject text,p_slug text,p_payment uuid)
+RETURNS TABLE(reference text,account_alias text,mode text,amount_minor bigint,currency text,state text)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $
+DECLARE a record;
+BEGIN
+ SELECT * INTO a FROM worthkind_flow.ops_actor(p_subject,p_slug);
+ IF NOT FOUND OR a.member_role NOT IN ('owner','manager','finance') THEN RAISE EXCEPTION 'Access denied' USING ERRCODE='42501'; END IF;
+ RETURN QUERY SELECT x.reference,x.account_alias,x.mode,x.amount_minor,x.currency,x.state FROM worthkind_flow.hotel_payment_intents x
+ WHERE x.id=p_payment AND x.property_id=a.property_id;
+ IF NOT FOUND THEN RAISE EXCEPTION 'Payment unavailable' USING ERRCODE='P0002'; END IF;
+END $;
+CREATE FUNCTION worthkind_flow.staff_refund_lookup(p_subject text,p_slug text,p_refund uuid)
+RETURNS TABLE(account_alias text,mode text,provider_refund_id numeric,provider_transaction_id numeric,amount_minor bigint,currency text)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $
+DECLARE a record;
+BEGIN
+ SELECT * INTO a FROM worthkind_flow.ops_actor(p_subject,p_slug);
+ IF NOT FOUND OR a.member_role NOT IN ('owner','manager','finance') THEN RAISE EXCEPTION 'Access denied' USING ERRCODE='42501'; END IF;
+ RETURN QUERY SELECT p.account_alias,p.mode,r.provider_refund_id,p.provider_transaction_id,r.amount_minor,p.currency
+ FROM worthkind_flow.hotel_refunds r JOIN worthkind_flow.hotel_payment_intents p ON p.id=r.payment_id AND p.property_id=r.property_id
+ WHERE r.id=p_refund AND r.property_id=a.property_id;
+ IF NOT FOUND THEN RAISE EXCEPTION 'Refund unavailable' USING ERRCODE='P0002'; END IF;
+END $;
+REVOKE ALL ON FUNCTION worthkind_flow.staff_payment_lookup(text,text,uuid),worthkind_flow.staff_refund_lookup(text,text,uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION worthkind_flow.staff_payment_lookup(text,text,uuid),worthkind_flow.staff_refund_lookup(text,text,uuid) TO wf_operations;
+
 COMMIT;
