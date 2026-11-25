@@ -32,6 +32,12 @@ def install_reservation_routes(app):
                   (slug,case_id,proof(x_receipt_token),body.room_type_id,body.arrival,body.departure,body.adults,body.children,body.room_count,body.request_key),guest=True)
         return {"id":str(r[0]),"state":r[1],"duplicate":r[2],"booking_confirmed":False,"inventory_held":False}
 
+    @app.get(g,dependencies=[Depends(enforce_guest_quota)])
+    def list_guest_intents(slug:str,case_id:UUID,x_receipt_token:str|None=Header(None)):
+        row=command("SELECT worthkind_flow.guest_reservation_intents(%s,%s,%s)",
+                    (slug,case_id,proof(x_receipt_token)),guest=True)
+        return {"intents":row[0],"booking_confirmed":False,"inventory_held":False}
+
     @app.post(g+"/{intent_id}/withdraw",dependencies=[Depends(enforce_guest_quota)])
     def withdraw(slug:str,case_id:UUID,intent_id:UUID,x_receipt_token:str|None=Header(None)):
         r=command("SELECT worthkind_flow.withdraw_reservation(%s,%s,%s,%s)",(slug,case_id,proof(x_receipt_token),intent_id),guest=True)
