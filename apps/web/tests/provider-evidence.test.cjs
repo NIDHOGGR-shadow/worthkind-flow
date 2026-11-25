@@ -18,3 +18,15 @@ test("settlement comparison keeps mode and does not claim a bank deposit",async(
  const api=providerEvidenceApi(async()=>ok(d),identity);assert.equal((await api.settlementTransactions("hotel-a",1,1)).mode,"test");
  await assert.rejects(providerEvidenceApi(async()=>ok({...d,bank_deposit_independently_verified:true}),identity).settlementTransactions("hotel-a",1,1));await assert.rejects(api.settlementTransactions("hotel-a",2,1));
 });
+
+test("PMS write requires guest authorization and binds the command key",async()=>{
+ const b={intent_id:id,request_key:"fixture-command",first_name:"Test",last_name:"Guest",country:"NG",postal_code:"100001",email:"guest@example.invalid",guest_authorized:true};
+ const calls=[];const api=providerEvidenceApi(async(u,o)=>{calls.push([u,o]);return ok({command:{id,operation:"create",request_key:b.request_key,state:"verified"},payment_confirmed:false})},identity);
+ await assert.rejects(api.createReservation("hotel-a",{...b,guest_authorized:false}));assert.equal(calls.length,0);await api.createReservation("hotel-a",b);assert.equal(calls.length,1);await assert.rejects(api.createReservation("hotel-a",{...b,request_key:"different-key"}));
+});
+test("PMS rate jobs remain separate from OTA delivery",async()=>{
+ const b={request_key:"fixture-rate",rate_id:"RATE-1",start:"2026-12-01",end:"2026-12-03",nightly_minor:50000};
+ const api=providerEvidenceApi(async()=>ok({command:{id,operation:"rate_update",request_key:b.request_key,state:"accepted"},ota_delivery_verified:false}),identity);
+ assert.equal((await api.updateRate("hotel-a",b)).state,"accepted");
+ await assert.rejects(providerEvidenceApi(async()=>ok({command:{id,operation:"rate_update",request_key:b.request_key,state:"verified"},ota_delivery_verified:true}),identity).verifyRate("hotel-a",id));
+});
