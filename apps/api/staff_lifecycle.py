@@ -11,7 +11,7 @@ from staff_oidc import verified_provider_subject, StaffTokenRejected, StaffAuthC
 
 class Invite(BaseModel):
     provider_subject: str = Field(min_length=8, max_length=255)
-    role: Literal["manager", "reception", "housekeeping", "maintenance", "kitchen", "finance"]
+    role: Literal["manager", "reception", "housekeeping", "maintenance", "kitchen", "finance", "it", "hr", "events", "procurement"]
 
 
 class Revoke(BaseModel):
