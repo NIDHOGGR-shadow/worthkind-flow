@@ -27,7 +27,7 @@ def config(subject,slug):
         raise HTTPException(503,"Hotel PMS credentials unavailable") from None
 
 def get(cfg,operation,params):
-    if operation not in ("getAvailableRoomTypes","getReservation","getReservations"):
+    if operation not in ("getAvailableRoomTypes","getReservation","getReservations","getRateJobs"):
         raise ValueError("Unsupported operation")
     url="https://api.cloudbeds.com/api/v1.3/"+operation+"?"+urlencode(params)
     req=Request(url,headers={"x-api-key":cfg["api_key"],"Accept":"application/json"})
