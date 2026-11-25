@@ -32,7 +32,7 @@ Q1 status: source implementation and prior automated browser checks passed; visu
 - [x] Ten staff and seven guest contract tests passed using fetched committed source in isolated JS harnesses; new UI syntax and static ID checks passed.
 - [x] Previous full Chromium suite passed in GitHub Actions run 45694066700 (36 route-width and 24 staff fixture layout checks).
 - [x] Extend browser fixtures for schedule, escalation and room operations; 36 authenticated staff module-width checks now authored.
-- [ ] Expanded Chromium suite passed in run 45695602215 (72 layout checks). Subsequent gateway HTTP tests and Chromium suite passed in run 45696044082; ticket-history browser coverage and screenshot capture were added after that baseline and still require final CI/visual inspection.
+- [ ] Expanded Chromium suite passed in run 45695602215 (72 layout checks). Subsequent gateway HTTP tests and Chromium suite passed in run 45696044082; ticket-history browser coverage and screenshot capture passed in run 45696214366; visual inspection remains open.
 - [ ] Configure an approved identity project and test real staff identities, roles and session lifecycle against authorized hosted PostgreSQL. OIDC interactive login, MFA and recovery remain outside this implementation.
 - [ ] Same-origin frontend gateway and nonroot container implemented; real loopback HTTP tests passed in run 45696044082 (versioned route allowlist, no legacy exposure, no forwarded client secrets/cookies, redirect/HTML denial). Hosted deployment and upstream rate-limit topology still require verification. See docs/FRONTEND_DEPLOYMENT.md.
 - [ ] Connect dedicated shift handover and guest-confirmed resolution when their backend contracts exist. Neither a ticket note nor a staff resolve command substitutes for them.
@@ -40,10 +40,20 @@ Q1 status: source implementation and prior automated browser checks passed; visu
 Q2 status: all currently available scoped staff API contracts implemented in source, including newly added ticket history. Four checklist gates remain open (two partially satisfied by passing automated browser/gateway tests). Backend PR #3 remains a separate integration dependency; dedicated handover, guest-confirmed case resolution, hosted identity and deployment are not claimed. Do not count fixture tests as proof of live integrations.
 
 ## Q3 — Reservations, guest stay and commerce
-- [ ] Hotel discovery, approved property content and room inventory.
-- [ ] Availability, holds, booking, check-in/out, folios and verified payment outcomes.
-- [ ] Dining, facilities, events, refunds and reconciliation with real provider contracts.
-- [ ] Browser and integration acceptance for these flows.
+- [x] Published property information, room catalog, nonbinding display rates, dining menu and venues.
+- [x] Receipt-scoped reservation request, unchanged retry, list, withdrawal and staff review/decline.
+- [x] Receipt-scoped venue request and staff venue review/accept/decline/cancel; current-session receipt display.
+- [x] Room type, physical room, display rate, menu and venue management commands. Updates require authoritative revision; public catalog does not expose current draft revisions.
+- [x] Read-only Cloudbeds availability, reservation status and channel reservation lookup; no hold or quote implied.
+- [x] Staff dining orders, server pricing, idempotent retry, kitchen transitions and service completion.
+- [x] Dining invoice, Paystack checkout link, provider verification, refund request/approval/submission/verification and finance exceptions.
+- [x] Separate test and live payment modes; exact HTTPS Paystack checkout-origin validation; no card data collection.
+- [x] Same-origin gateway allowlist for Q3 routes; session/property data cleanup; responsive catalog and operational forms.
+- [x] Initial nine commerce contract tests passed in GitHub Actions run 45699643768. Two additional catalog/channel tests and expanded guest/staff Chromium tests are committed; final execution not yet verified.
+- [ ] Final expanded browser acceptance and full visual inspection, including newly added catalog management.
+- [ ] Authoritative room holds, binding quotes, actual PMS booking/create/change/cancel, check-in/out write commands, guest dining order API, persistent guest venue tracking and broader folios/settlements. These do not exist in the scoped backend contract yet.
+- [ ] Real identity, deployed gateway, authorized PMS/Paystack activation and hosted property acceptance. No live provider operation is claimed.
+Q3 status: 10 of 13 tracked items implemented or evidenced; checklist count is not a production readiness or effort estimate. Source support for current APIs does not equal real provider activation. Do not advance a reservation request to confirmed without source authority.
 
 ## Q4 — Business management and release readiness
 - [ ] Management analytics, CRM, website content, marketing, procurement and careers.
