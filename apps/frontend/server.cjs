@@ -29,7 +29,7 @@ const allowed=[
  ["GET","/vacancies"],["POST","/staff/vacancies"],["POST","/staff/vacancies/"+UUID+"/decision"],["GET","/staff/applications"],["POST","/staff/applications/"+UUID+"/decision"],
  ["GET","/guest/cases/"+UUID+"/preferences"],["PUT","/guest/cases/"+UUID+"/preferences"],["POST","/guest/cases/"+UUID+"/feedback"],["POST","/guest/cases/"+UUID+"/applications"],
  ["GET","/staff/pms/reservation-evidence"],["POST","/staff/pms/reservation-evidence"],["GET","/staff/pms/commands"],["GET","/staff/pos/reconciliation"],["POST","/staff/pos/orders/"+UUID+"/reconcile"],["GET","/staff/finance/settlements"],["GET","/staff/finance/settlements/[0-9]{1,20}/transactions"],["GET","/staff/feedback"],["POST","/staff/feedback/"+UUID+"/review"],
- ["GET","/native-availability"],["PUT","/staff/bookable-rates"],["GET","/staff/native-bookings"],["POST","/staff/native-bookings/holds"],["POST","/staff/native-bookings/"+UUID+"/cancel"],["GET","/guest/cases/"+UUID+"/native-bookings"],["POST","/guest/cases/"+UUID+"/native-bookings/"+UUID+"/(?:confirm|change-dates)"]
+ ["GET","/native-availability"],["PUT","/staff/bookable-rates"],["GET","/staff/native-bookings"],["POST","/staff/native-bookings/holds"],["POST","/staff/native-bookings/"+UUID+"/cancel"],["GET","/staff/native-bookings/"+UUID+"/folio"],["POST","/staff/native-bookings/"+UUID+"/stay"],["POST","/staff/finance/stay-invoices"],["GET","/guest/cases/"+UUID+"/native-bookings"],["POST","/guest/cases/"+UUID+"/native-bookings/"+UUID+"/(?:confirm|change-dates)"]
 ].map(([method,suffix])=>[method,new RegExp("^/api/v1/properties/[a-z0-9]+(?:-[a-z0-9]+)*"+suffix+"$")]);
 function config(env){
  const upstream=new URL(env.WF_FRONTEND_API_ORIGIN||"");
