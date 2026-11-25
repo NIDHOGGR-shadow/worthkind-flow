@@ -1280,3 +1280,32 @@ def test_pms_command_replay_and_intent_guard(pg, seeded):
         pg.execute(q,("idp:hotel-b-reception",slug,intent))
     assert pg.execute("SELECT worthkind_flow.finish_pms_command(%s,%s,%s,'unknown',NULL,NULL,'{}'::jsonb)",(subject,slug,first["id"])).fetchone()[0]["state"]=="unknown"
     assert pg.execute(q,args).fetchone()[0]["submit"] is False
+
+
+def test_pos_refresh_lease_and_cancelled_receipt(pg, seeded):
+    from datetime import datetime,timezone,timedelta
+    from psycopg.types.json import Jsonb
+    subject="idp:hotel-a-owner"
+    slug="hotel-a"
+    item=pg.execute("SELECT id FROM worthkind_flow.save_menu_item(%s,%s,'pos-meal','Meal','',5000,'NGN',true,0)",(subject,slug)).fetchone()[0]
+    order=pg.execute("SELECT id FROM worthkind_flow.create_dining_order(%s,%s,'pos-order-001',NULL,%s)",(subject,slug,Jsonb([{"item_id":str(item),"quantity":2}]))).fetchone()[0]
+    for action in ("accept","prepare","ready","serve"):
+        pg.execute("SELECT worthkind_flow.transition_dining_order(%s,%s,%s,%s)",(subject,slug,order,action))
+    pg.execute("SELECT worthkind_flow.configure_loyverse(%s,'store-ci','pos-ci','NGN',2,'disposable POS approval',true)",(slug,))
+    created=datetime.now(timezone.utc)
+    ev=pg.execute("SELECT worthkind_flow.record_pos_receipt(%s,%s,%s,'pos-ci','store-ci','receipt-ci',10000,'NGN','SALE',%s,%s)",(subject,slug,order,created,created)).fetchone()[0]
+    assert ev["matched"] is True
+    leased=pg.execute("SELECT * FROM worthkind_flow.lease_pos_refresh(5)").fetchall()
+    assert len(leased)==1
+    eid,lease,*_=leased[0]
+    assert pg.execute("SELECT * FROM worthkind_flow.lease_pos_refresh(5)").fetchall()==[]
+    q="SELECT worthkind_flow.complete_pos_refresh(%s,%s,'pos-ci','store-ci','receipt-ci',10000,'SALE',%s,%s,%s,true)"
+    cancelled=created+timedelta(seconds=1)
+    assert pg.execute(q,(eid,uuid4(),created,cancelled,cancelled)).fetchone()[0] is False
+    assert pg.execute(q,(eid,lease,created,cancelled,cancelled)).fetchone()[0] is True
+    assert pg.execute("SELECT matched,cancelled_at FROM worthkind_flow.pos_receipt_evidence WHERE id=%s",(eid,)).fetchone()==(False,cancelled)
+    assert pg.execute(q,(eid,lease,created,cancelled,cancelled)).fetchone()[0] is False
+    newer=cancelled+timedelta(seconds=1)
+    ev=pg.execute("SELECT worthkind_flow.record_pos_receipt(%s,%s,%s,'pos-ci','store-ci','receipt-ci',10000,'NGN','SALE',%s,%s)",(subject,slug,order,created,newer)).fetchone()[0]
+    assert ev["matched"] is False
+    assert pg.execute("SELECT count(*) FROM worthkind_flow.hotel_payment_intents").fetchone()[0]==0
