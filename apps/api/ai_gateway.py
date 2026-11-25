@@ -61,9 +61,9 @@ def search_query(question):
     return " OR ".join(words)
 
 def handoff(reason):
-    return {"status":"handoff","reason":reason,"answer":None,"sources":[],"human_contact_available_via_property":True,"action_executed":False}
+    return {"status":"handoff","reason":reason,"answer":None,"sources":[],"human_handoff_required":True,"action_executed":False}
 
-def answer(slug,body,subject=None):
+def answer(slug,body,subject=None,*,reserved_call=None,voice_renderer=None):
     if not body.consent_to_model_processing:
         return handoff("consent_required")
     try:
@@ -75,7 +75,7 @@ def answer(slug,body,subject=None):
     if not query:
         return handoff("no_relevant_terms")
     try:
-        call=db("SELECT worthkind_flow.begin_ai_call(%s,%s,%s)",(slug,subject,"staff_assist" if subject else "guest_chat"))[0]
+        call=reserved_call or db("SELECT worthkind_flow.begin_ai_call(%s,%s,%s)",(slug,subject,"staff_assist" if subject else "guest_chat"))[0]
     except HTTPException as exc:
         if exc.status_code==403:
             raise
@@ -89,13 +89,16 @@ def answer(slug,body,subject=None):
         ids=select_sources(question,sources)
         selected=[s for s in sources if s["id"] in ids]
         state="answered" if selected else "abstained"
+        text="\n\n".join(s["body"] for s in selected)
+        # Voice synthesis receives only the selected public excerpts, never the raw question.
+        audio=voice_renderer(text) if selected and voice_renderer else None
         allowed=db("SELECT worthkind_flow.finish_ai_call(%s,%s,%s,%s::uuid[])",(slug,call,state,[UUID(s["id"]) for s in selected]))[0]
         if not allowed or not selected:
             return handoff("source_or_policy_unavailable")
         # Model prose is deliberately never returned. Verbatim excerpts are attributable to owners.
-        return {"status":"answered","answer":"\n\n".join(s["body"] for s in selected),
+        return {"status":"answered","answer":text,
                 "sources":[{k:v for k,v in s.items() if k!="body"} for s in selected],
-                "action_executed":False,"answer_type":"approved_content_excerpt"}
+                "action_executed":False,"answer_type":"approved_content_excerpt",**({"audio":audio} if audio else {})}
     except (HTTPException,ModelUnavailable):
         try:
             db("SELECT worthkind_flow.finish_ai_call(%s,%s,%s,%s::uuid[])",(slug,call,"failed",[]))
