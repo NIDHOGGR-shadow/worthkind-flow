@@ -32,25 +32,54 @@ class GuestStorageError(RuntimeError):
     pass
 
 
-def _configured_key() -> bytes:
-    encoded = os.getenv("WF_DATA_KEY_B64")
-    if not encoded:
-        raise GuestStorageNotConfigured("Encryption key is not configured")
+_MAGIC = b"WFKEY01:"
+def _decode_key(encoded):
     try:
         key = base64.b64decode(encoded, validate=True)
-    except (ValueError, base64.binascii.Error) as exc:
+    except (ValueError, TypeError) as exc:
         raise GuestStorageNotConfigured("Encryption key is invalid") from exc
     if len(key) != 32:
         raise GuestStorageNotConfigured("Encryption key must be exactly 32 bytes")
     return key
 
 
+def _configured_key() -> bytes:
+    encoded = os.getenv("WF_DATA_KEY_B64")
+    if not encoded:
+        raise GuestStorageNotConfigured("Legacy encryption key is not configured")
+    return _decode_key(encoded)
+
+
+def _keyring():
+    raw = os.getenv("WF_DATA_KEYS_JSON")
+    if not raw:
+        return None
+    try:
+        keys = json.loads(raw)
+        if not isinstance(keys, dict) or not keys or any(
+            not isinstance(k, str) or len(k) != 8 or not k.isascii() or not k.isalnum()
+            for k in keys
+        ):
+            raise ValueError("Invalid key identifiers")
+        decoded = {k: _decode_key(v) for k, v in keys.items()}
+    except (ValueError, TypeError) as exc:
+        raise GuestStorageNotConfigured("Invalid encryption keyring") from exc
+    active = os.getenv("WF_DATA_ACTIVE_KEY_ID")
+    if active not in decoded:
+        raise GuestStorageNotConfigured("Active encryption key missing")
+    return active, decoded
+
+
 def encrypt_json(value: dict, *, associated_data: str) -> bytes:
     nonce = secrets.token_bytes(12)
     plaintext = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    return nonce + AESGCM(_configured_key()).encrypt(
-        nonce, plaintext, associated_data.encode("utf-8")
-    )
+    ring = _keyring()
+    aad = associated_data.encode("utf-8")
+    if ring is None:
+        return nonce + AESGCM(_configured_key()).encrypt(nonce, plaintext, aad)
+    active, keys = ring
+    header = _MAGIC + active.encode("ascii")
+    return header + nonce + AESGCM(keys[active]).encrypt(nonce, plaintext, header + aad)
 
 
 def decrypt_json(blob: bytes | None, *, associated_data: str) -> dict | None:
@@ -59,16 +88,24 @@ def decrypt_json(blob: bytes | None, *, associated_data: str) -> dict | None:
     if len(blob) < 29:
         raise GuestStorageError("Stored payload is unavailable")
     try:
-        data = AESGCM(_configured_key()).decrypt(
-            blob[:12], blob[12:], associated_data.encode("utf-8")
-        )
+        blob = bytes(blob)
+        aad = associated_data.encode("utf-8")
+        if blob.startswith(_MAGIC):
+            header = blob[:16]
+            ring = _keyring()
+            if ring is None or len(blob) < 45:
+                raise GuestStorageNotConfigured("Versioned encryption key unavailable")
+            key_id = header[8:].decode("ascii")
+            key = ring[1].get(key_id)
+            if key is None:
+                raise GuestStorageNotConfigured("Versioned encryption key unavailable")
+            data = AESGCM(key).decrypt(blob[16:28], blob[28:], header + aad)
+        else:
+            data = AESGCM(_configured_key()).decrypt(blob[:12], blob[12:], aad)
         result = json.loads(data)
     except GuestStorageNotConfigured:
         raise
-    except (ValueError, TypeError, json.JSONDecodeError) as exc:
-        raise GuestStorageError("Stored payload could not be authenticated") from exc
     except Exception as exc:
-        # Includes AES-GCM InvalidTag; never include ciphertext or guest data.
         raise GuestStorageError("Stored payload could not be authenticated") from exc
     if not isinstance(result, dict):
         raise GuestStorageError("Stored payload has invalid format")
