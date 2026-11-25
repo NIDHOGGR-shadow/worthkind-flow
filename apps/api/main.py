@@ -508,3 +508,6 @@ install_property_config_routes(app)
 
 from private_documents import install_document_routes
 install_document_routes(app)
+
+from operations_pg import install_operations_pg_routes
+install_operations_pg_routes(app)
