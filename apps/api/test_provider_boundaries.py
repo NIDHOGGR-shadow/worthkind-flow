@@ -7,6 +7,8 @@ from unittest.mock import patch
 from fastapi import HTTPException
 from paystack_provider import webhook_valid,account,ProviderUnavailable,initialize
 from cloudbeds_pg import reservation_view
+from loyverse_pg import receipt_view
+from decimal import Decimal
 
 class ProviderBoundaryTests(unittest.TestCase):
     def test_timestamped_signature_and_downgrade_denial(self):
@@ -48,6 +50,15 @@ class ProviderBoundaryTests(unittest.TestCase):
         self.assertEqual(result["state"],"confirmed")
         self.assertNotIn("guestName",result)
         self.assertNotIn("guestEmail",result)
+
+    def test_pos_store_receipt_and_money_precision(self):
+        cfg={"store_id":"store-a","minor_digits":2,"currency":"NGN"}
+        data={"receipt_number":"receipt1","store_id":"store-a","receipt_type":"SALE","total_money":Decimal("123.45"),"created_at":"2026-01-01T12:00:00Z","updated_at":"2026-01-01T12:00:00Z"}
+        self.assertEqual(receipt_view(cfg,"receipt1",data)[0],12345)
+        with self.assertRaises(HTTPException):
+            receipt_view({**cfg,"store_id":"store-b"},"receipt1",data)
+        with self.assertRaises(HTTPException):
+            receipt_view(cfg,"receipt1",{**data,"total_money":Decimal("123.456")})
 
 if __name__=="__main__":
     unittest.main()
