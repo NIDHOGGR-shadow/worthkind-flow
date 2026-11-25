@@ -24,7 +24,7 @@ import pytest
 
 MIGRATIONS = [
     Path(__file__).resolve().parents[3] / "db" / "migrations" / name
-    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql", "008_hotel_onboarding_settings.sql", "009_identity_provisioning.sql", "010_guest_quota.sql", "011_private_documents.sql", "012_operational_tickets.sql", "013_content_catalog.sql", "014_rooms_rates.sql", "015_rate_lookup_qualification.sql", "016_inventory_procurement.sql", "017_dining_kitchen.sql", "018_menu_lock_qualification.sql", "019_department_roles.sql", "020_staff_shifts.sql", "021_guest_preferences_feedback.sql", "022_reservation_intents.sql", "023_hotel_finance.sql", "024_events_recruitment.sql", "025_pms_accounts.sql", "026_reception_controls.sql", "027_payment_mode_boundaries.sql", "028_operations_read_contracts.sql", "029_native_booking_inventory.sql", "030_native_booking_changes.sql", "031_pos_receipt_evidence.sql", "032_purchase_batches.sql", "033_partial_refunds.sql", "034_native_stay_invoices.sql", "035_settlement_reconciliation.sql", "036_pms_reservation_evidence.sql", "037_native_stay_operations.sql", "038_pms_commands.sql", "039_provider_sync_guards.sql", "040_pos_refresh_worker.sql", "041_pos_cancellation_guard.sql", "042_pms_readback_recovery.sql")
+    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql", "008_hotel_onboarding_settings.sql", "009_identity_provisioning.sql", "010_guest_quota.sql", "011_private_documents.sql", "012_operational_tickets.sql", "013_content_catalog.sql", "014_rooms_rates.sql", "015_rate_lookup_qualification.sql", "016_inventory_procurement.sql", "017_dining_kitchen.sql", "018_menu_lock_qualification.sql", "019_department_roles.sql", "020_staff_shifts.sql", "021_guest_preferences_feedback.sql", "022_reservation_intents.sql", "023_hotel_finance.sql", "024_events_recruitment.sql", "025_pms_accounts.sql", "026_reception_controls.sql", "027_payment_mode_boundaries.sql", "028_operations_read_contracts.sql", "029_native_booking_inventory.sql", "030_native_booking_changes.sql", "031_pos_receipt_evidence.sql", "032_purchase_batches.sql", "033_partial_refunds.sql", "034_native_stay_invoices.sql", "035_settlement_reconciliation.sql", "036_pms_reservation_evidence.sql", "037_native_stay_operations.sql", "038_pms_commands.sql", "039_provider_sync_guards.sql", "040_pos_refresh_worker.sql", "041_pos_cancellation_guard.sql", "042_pms_readback_recovery.sql", "043_provider_emergency_disable.sql")
 ]
 
 
@@ -1273,8 +1273,11 @@ def test_pms_command_replay_and_intent_guard(pg, seeded):
     assert first["submit"] is True
     assert pg.execute("SELECT worthkind_flow.check_pms_command_payload(%s,%s,%s,repeat(\x27a\x27,64))",(subject,slug,first["id"])).fetchone()[0] is True
     assert pg.execute("SELECT worthkind_flow.check_pms_command_payload(%s,%s,%s,repeat(\x27b\x27,64))",(subject,slug,first["id"])).fetchone()[0] is False
+    pg.execute("SELECT worthkind_flow.configure_cloudbeds(%s,'property-ci','account-ci','disposable PMS configuration',false)",(slug,))
+    assert not pg.execute("SELECT enabled FROM worthkind_flow.pms_accounts a JOIN worthkind_flow.properties p ON p.id=a.property_id WHERE p.slug=%s",(slug,)).fetchone()[0]
     with pytest.raises(errors.CheckViolation):
-        pg.execute("SELECT worthkind_flow.configure_cloudbeds(%s,\x27property-ci\x27,\x27account-ci\x27,\x27disposable PMS configuration\x27,false)",(slug,))
+        pg.execute("INSERT INTO worthkind_flow.native_booking_accounts(property_id,approval_reference,enabled) SELECT id,'disposable inventory',true FROM worthkind_flow.properties WHERE slug=%s",(slug,))
+    pg.execute("SELECT worthkind_flow.configure_cloudbeds(%s,'property-ci','account-ci','disposable PMS configuration',true)",(slug,))
     assert pg.execute(q,args).fetchone()[0]["submit"] is False
     with pytest.raises(errors.CheckViolation):
         pg.execute("SELECT worthkind_flow.withdraw_reservation(%s,%s,repeat('b',64),%s)",(slug,cid,intent))
