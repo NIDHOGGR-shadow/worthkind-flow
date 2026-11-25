@@ -11,7 +11,7 @@ class StaffConfigurationError(ValueError):
 
 def validate_environment(raw):
     mode = raw.strip().casefold()
-    if mode not in {"development", "test"}:
+    if mode not in {"development", "test", "staging"}:
         raise RuntimeError("Unsupported WF_ENV: production readiness is not verified")
     return mode
 
