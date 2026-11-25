@@ -31,7 +31,8 @@ def check_guest_commerce(browser, base):
             route.fulfill(json={"vacancies":[{"id":VENUE,"title":"Synthetic vacancy","description":"Published fixture vacancy","deadline":"2026-12-01"}]})
         elif path == prefix + "/enquiries" and req.method == "POST":
             state["token"] = req.post_data_json["receipt_token"]
-            route.fulfill(json={"case_id":CASE,"receipt_token":state["token"],"status":"queued"})
+            state["kind"] = req.post_data_json["kind"]
+            route.fulfill(json={"case_id":CASE,"receipt_token":state["token"],"status":"queued","kind":state["kind"]})
         elif path.startswith(private):
             assert req.headers.get("x-receipt-token") == state["token"]
             assert state["token"] not in req.url
@@ -46,6 +47,7 @@ def check_guest_commerce(browser, base):
                 assert req.post_data_json["rating"] == 4
                 route.fulfill(json={"id":INTENT,"state":"new"})
             elif path == private + "/applications":
+                assert state["kind"] == "careers"
                 assert req.post_data_json["consent"] is True
                 assert req.post_data_json["vacancy_id"] == VENUE
                 route.fulfill(json={"id":INTENT,"state":"submitted"})
@@ -113,13 +115,7 @@ def check_guest_commerce(browser, base):
     page.get_by_role("button", name="Submit feedback").click()
     expect(page.locator("#guest-records-message")).to_contain_text("recorded by server")
     expect(page.get_by_role("button", name="Submit feedback")).to_be_disabled()
-    page.locator("#load-application-vacancies").click()
-    page.locator("#application-vacancy").select_option(VENUE)
-    page.locator("#application-statement").fill("Synthetic application statement")
-    page.locator("#application-consent").check()
-    page.get_by_role("button", name="Submit application").click()
-    expect(page.locator("#application-receipt")).to_contain_text("submitted")
-    expect(page.get_by_role("button", name="Submit application")).to_be_disabled()
+    expect(page.locator("#guest-application-form")).to_be_hidden()
     for width in (320,360,390,768,1024,1440):
         page.set_viewport_size({"width":width,"height":900})
         actual = page.evaluate("Math.max(document.documentElement.scrollWidth, document.body.scrollWidth)")
@@ -130,5 +126,19 @@ def check_guest_commerce(browser, base):
     expect(page.locator("#application-receipt")).to_be_empty()
     expect(page.locator("#guest-intents")).to_be_empty()
     expect(page.locator("#guest-venue-requests")).to_be_empty()
+    page.locator("#v1-hotel").fill("hotel-a")
+    page.locator("#v1-kind").select_option("careers")
+    page.locator("#v1-name").fill("Synthetic applicant")
+    page.locator("#v1-contact").fill("applicant@example.invalid")
+    page.locator("#v1-details").fill("Synthetic careers enquiry")
+    page.locator("#v1-submit").click()
+    expect(page.locator("#guest-application-form")).to_be_visible()
+    page.locator("#load-application-vacancies").click()
+    page.locator("#application-vacancy").select_option(VENUE)
+    page.locator("#application-statement").fill("Synthetic application statement")
+    page.locator("#application-consent").check()
+    page.get_by_role("button", name="Submit application").click()
+    expect(page.locator("#application-receipt")).to_contain_text("submitted")
+    expect(page.get_by_role("button", name="Submit application")).to_be_disabled()
     page.close()
     print("PASS: guest commerce catalog, receipt-scoped stay retry, withdrawal, venue request, preferences, feedback, application, and six viewport checks")
