@@ -20,7 +20,7 @@ def check_guest_commerce(browser, base):
         path = urlsplit(req.url).path
         assert req.headers.get("authorization") is None
         if path == prefix + "/content":
-            route.fulfill(json={"content":[{"key":"hotel","content":{"title":"Synthetic hotel","body":"Approved fixture content"}}]})
+            route.fulfill(json={"content":[{"key":"hotel","version":1,"content":{"title":"Synthetic hotel","body":"Approved fixture content"}},{"key":"privacy-policy","version":1,"content":{"title":"Synthetic privacy policy","body":"Fixture policy for consent tests only."}}]})
         elif path == prefix + "/rooms":
             route.fulfill(json={"rooms":[{"id":ROOM,"name":"Synthetic deluxe","max_guests":2,"description":"Fixture room","display_rates":[{"amount_minor":5000000,"currency":"NGN","start_date":"2026-12-01","end_date":"2026-12-31"}]}]})
         elif path == prefix + "/menu":
@@ -43,6 +43,9 @@ def check_guest_commerce(browser, base):
                     route.fulfill(json={"revision":1})
                 else:
                     route.fulfill(json={"preferences":None,"revision":0})
+            elif path == private + "/consent":
+                assert req.post_data_json == {"purpose":"marketing","granted":False,"policy_version":"privacy-policy:1"}
+                route.fulfill(json={"id":INTENT,"purpose":"marketing","granted":False})
             elif path == private + "/feedback":
                 assert req.post_data_json["rating"] == 4
                 route.fulfill(json={"id":INTENT,"state":"new"})
@@ -110,6 +113,13 @@ def check_guest_commerce(browser, base):
     page.locator("#guest-language").fill("English")
     page.get_by_role("button", name="Save preferences").click()
     expect(page.locator("#guest-records-message")).to_contain_text("Revision 1")
+    page.locator("#load-consent-policy").click()
+    expect(page.locator("#consent-policy-text")).to_contain_text("Synthetic privacy policy")
+    page.locator("#consent-purpose").select_option("marketing")
+    page.locator("#consent-choice").select_option("deny")
+    page.locator("#consent-reviewed").check()
+    page.get_by_role("button", name="Record my choice").click()
+    expect(page.locator("#consent-result")).to_contain_text("not granted")
     page.locator("#guest-rating").select_option("4")
     page.locator("#guest-feedback-comment").fill("Synthetic feedback")
     page.get_by_role("button", name="Submit feedback").click()
