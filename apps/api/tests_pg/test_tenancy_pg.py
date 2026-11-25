@@ -24,7 +24,7 @@ import pytest
 
 MIGRATIONS = [
     Path(__file__).resolve().parents[3] / "db" / "migrations" / name
-    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql", "008_hotel_onboarding_settings.sql", "009_identity_provisioning.sql", "010_guest_quota.sql", "011_private_documents.sql", "012_operational_tickets.sql", "013_content_catalog.sql", "014_rooms_rates.sql", "015_rate_lookup_qualification.sql", "016_inventory_procurement.sql", "017_dining_kitchen.sql", "018_menu_lock_qualification.sql", "019_department_roles.sql", "020_staff_shifts.sql", "021_guest_preferences_feedback.sql", "022_reservation_intents.sql", "023_hotel_finance.sql", "024_events_recruitment.sql", "025_pms_accounts.sql", "026_reception_controls.sql", "027_payment_mode_boundaries.sql", "028_operations_read_contracts.sql", "029_native_booking_inventory.sql", "030_native_booking_changes.sql", "031_pos_receipt_evidence.sql", "032_purchase_batches.sql")
+    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql", "008_hotel_onboarding_settings.sql", "009_identity_provisioning.sql", "010_guest_quota.sql", "011_private_documents.sql", "012_operational_tickets.sql", "013_content_catalog.sql", "014_rooms_rates.sql", "015_rate_lookup_qualification.sql", "016_inventory_procurement.sql", "017_dining_kitchen.sql", "018_menu_lock_qualification.sql", "019_department_roles.sql", "020_staff_shifts.sql", "021_guest_preferences_feedback.sql", "022_reservation_intents.sql", "023_hotel_finance.sql", "024_events_recruitment.sql", "025_pms_accounts.sql", "026_reception_controls.sql", "027_payment_mode_boundaries.sql", "028_operations_read_contracts.sql", "029_native_booking_inventory.sql", "030_native_booking_changes.sql", "031_pos_receipt_evidence.sql", "032_purchase_batches.sql", "033_partial_refunds.sql", "034_native_stay_invoices.sql", "035_settlement_reconciliation.sql")
 ]
 
 
@@ -1185,3 +1185,37 @@ def test_purchase_batch_replay_and_approval(pg, oidc_rig, monkeypatch):
     assert client.post(base+"/purchase-batches/"+batch+"/decision",json={"action":"approve"},headers=owner).status_code==200
     data=client.get(base+"/purchase-batches",headers=owner).json()["batches"]
     assert len(data[0]["lines"])==2 and all(x["state"]=="approved" for x in data[0]["lines"])
+
+
+def test_partial_refund_balance_reservation_in_disposable_db(pg, oidc_rig, monkeypatch):
+    # Database-only synthetic evidence, never a network payment or refund.
+    client,key,source=oidc_rig
+    monkeypatch.setenv("WF_OPERATIONS_POSTGRES_DSN",os.environ["WF_STAFF_POSTGRES_DSN"])
+    owner=auth_header(signed_token(key,"idp:hotel-a-owner"))
+    base="/api/v1/properties/hotel-a/staff"
+    item=client.put(base+"/menu",json={"code":"refund-test","name":"Test item","price_minor":5000,"currency":"NGN","available":True,"revision":0},headers=owner)
+    assert item.status_code==200,item.text
+    order=client.post(base+"/dining/orders",json={"request_key":"refund-order-test","lines":[{"item_id":item.json()["id"],"quantity":2}]},headers=owner)
+    assert order.status_code==201,order.text
+    oid=order.json()["id"]
+    for action in ("accept","prepare","ready","serve"):
+        assert client.post(base+"/dining/orders/"+oid+"/transition",json={"action":action},headers=owner).status_code==200
+    invoice=client.post(base+"/finance/invoices",json={"dining_order_id":oid},headers=owner)
+    assert invoice.status_code==201,invoice.text
+    iid=invoice.json()["id"]
+    pg.execute("SELECT worthkind_flow.configure_hotel_payments('hotel-a','disposable-refund-test','test','disposable provider fixture',true)")
+    payment=pg.execute("SELECT * FROM worthkind_flow.begin_hotel_payment('idp:hotel-a-owner','hotel-a',%s)",(iid,)).fetchone()
+    pid,ref=payment[:2]
+    assert pg.execute("SELECT worthkind_flow.record_verified_payment('hotel-a',%s,'disposable-refund-test','test',1234567,10000,'NGN')",(ref,)).fetchone()[0]=="verified"
+    req={"payment_id":str(pid),"reason":"Disposable partial refund test","amount_minor":4000,"request_key":"refund-test-001"}
+    r=client.post(base+"/finance/refunds",json=req,headers=owner)
+    assert r.status_code==201,r.text
+    rid=r.json()["id"]
+    assert client.post(base+"/finance/refunds",json=req,headers=owner).json()["id"]==rid
+    req.update(amount_minor=7000,request_key="refund-test-002")
+    assert client.post(base+"/finance/refunds",json=req,headers=owner).status_code==409
+    req.update(amount_minor=6000)
+    assert client.post(base+"/finance/refunds",json=req,headers=owner).status_code==201
+    report=client.get(base+"/finance",headers=owner).json()
+    assert report["invoices"][0]["state"]=="test_verified"
+    assert sum(x["amount_minor"] for x in report["refunds"])==10000
