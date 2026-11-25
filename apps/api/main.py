@@ -541,3 +541,6 @@ install_department_routes(app)
 
 from cloudbeds_pg import install_pms_routes
 install_pms_routes(app)
+
+from operations_pg import install_reception_controls
+install_reception_controls(app)
