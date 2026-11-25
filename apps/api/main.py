@@ -11,7 +11,7 @@ import sqlite3
 from uuid import uuid4
 
 from fastapi import FastAPI, Header, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from ticketing import create_ticket_tables, install_ticket_routes
@@ -20,9 +20,9 @@ from sla import install_sla_routes
 from delivery_contract import create_delivery_tables, install_delivery_routes
 from knowledge import create_knowledge_tables, install_knowledge_routes, identify_knowledge_key
 
-APP_ENV = os.getenv("WF_ENV", "development")
-if APP_ENV == "production":
-    raise RuntimeError("Production blocked: migrations, RBAC, outbox, rate limits and secret management are unfinished.")
+from runtime_boundary import StaffConfigurationError, sqlite_ready, staff_key_matches, validate_environment
+
+APP_ENV = validate_environment(os.getenv("WF_ENV", "development"))
 app = FastAPI(title="Worthkind Flow P0", version="0.1.0", description="Human-assisted enquiry. No live booking or payment.")
 
 @app.middleware("http")
@@ -34,9 +34,7 @@ async def protect_private_api_responses(request, call_next):
     """
     response = await call_next(request)
     path = request.url.path
-    if path.startswith("/api/properties/") and (
-        "/enquiries" in path or "/staff/" in path
-    ):
+    if path.startswith("/api/") or path in ("/health", "/ready"):
         response.headers["Cache-Control"] = "no-store"
         response.headers["Pragma"] = "no-cache"
     return response
@@ -180,6 +178,15 @@ def health():
     return {"status": "ok", "stage": "p0-dev-only", "live_bookings": False, "live_payments": False}
 
 
+@app.get("/ready", include_in_schema=False)
+def ready():
+    available = sqlite_ready(os.getenv("WF_DATABASE_PATH", "./worthkind-flow-dev.sqlite3"))
+    return JSONResponse(status_code=200 if available else 503, content={
+        "status": "ready" if available else "not_ready",
+        "stage": "p0-dev-only", "production_ready": False,
+    })
+
+
 def property_id(conn, slug: str):
     row = conn.execute("SELECT id FROM properties WHERE slug=?", (slug,)).fetchone()
     if not row:
@@ -314,11 +321,10 @@ def read_enquiry(slug: str, case_id: str, x_receipt_token: str | None = Header(N
 
 def require_staff(slug: str, staff_key: str | None):
     try:
-        configured = json.loads(os.getenv("WF_DEV_STAFF_KEYS_JSON", "{}"))
-    except json.JSONDecodeError:
-        raise HTTPException(503, "Staff keys misconfigured")
-    expected = configured.get(slug)
-    if not expected or not staff_key or not hmac.compare_digest(expected, staff_key):
+        authorized = staff_key_matches(os.getenv("WF_DEV_STAFF_KEYS_JSON", "{}"), slug, staff_key)
+    except StaffConfigurationError:
+        raise HTTPException(503, "Staff keys misconfigured") from None
+    if not authorized:
         raise HTTPException(401, "Staff authentication required")
     # DEVELOPMENT ONLY: use real staff login and per-role permissions before production.
     return "dev-staff:" + slug
