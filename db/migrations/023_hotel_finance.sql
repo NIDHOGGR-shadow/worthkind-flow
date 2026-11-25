@@ -236,7 +236,7 @@ GRANT EXECUTE ON FUNCTION worthkind_flow.payment_checkout_result(text,text,text,
 
 CREATE FUNCTION worthkind_flow.staff_payment_lookup(p_subject text,p_slug text,p_payment uuid)
 RETURNS TABLE(reference text,account_alias text,mode text,amount_minor bigint,currency text,state text)
-LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
 DECLARE a record;
 BEGIN
  SELECT * INTO a FROM worthkind_flow.ops_actor(p_subject,p_slug);
@@ -244,10 +244,10 @@ BEGIN
  RETURN QUERY SELECT x.reference,x.account_alias,x.mode,x.amount_minor,x.currency,x.state FROM worthkind_flow.hotel_payment_intents x
  WHERE x.id=p_payment AND x.property_id=a.property_id;
  IF NOT FOUND THEN RAISE EXCEPTION 'Payment unavailable' USING ERRCODE='P0002'; END IF;
-END $;
+END $$;
 CREATE FUNCTION worthkind_flow.staff_refund_lookup(p_subject text,p_slug text,p_refund uuid)
 RETURNS TABLE(account_alias text,mode text,provider_refund_id numeric,provider_transaction_id numeric,amount_minor bigint,currency text)
-LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
 DECLARE a record;
 BEGIN
  SELECT * INTO a FROM worthkind_flow.ops_actor(p_subject,p_slug);
@@ -256,7 +256,7 @@ BEGIN
  FROM worthkind_flow.hotel_refunds r JOIN worthkind_flow.hotel_payment_intents p ON p.id=r.payment_id AND p.property_id=r.property_id
  WHERE r.id=p_refund AND r.property_id=a.property_id;
  IF NOT FOUND THEN RAISE EXCEPTION 'Refund unavailable' USING ERRCODE='P0002'; END IF;
-END $;
+END $$;
 REVOKE ALL ON FUNCTION worthkind_flow.staff_payment_lookup(text,text,uuid),worthkind_flow.staff_refund_lookup(text,text,uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION worthkind_flow.staff_payment_lookup(text,text,uuid),worthkind_flow.staff_refund_lookup(text,text,uuid) TO wf_operations;
 
