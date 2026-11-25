@@ -79,11 +79,11 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
-    env:
-      PG_CONTAINER: ${{ job.services.postgres.id }}
     steps:
       - uses: actions/checkout@v4
       - name: Apply all repository migrations to disposable database
+        env:
+          PG_CONTAINER: ${{ job.services.postgres.id }}
         shell: bash
         run: |
           set -euo pipefail
@@ -91,6 +91,8 @@ jobs:
             docker exec -i "$PG_CONTAINER" psql -X -v ON_ERROR_STOP=1 -U postgres -d worthkind_ci < "$file"
           done
       - name: Seed only disposable recovery evidence
+        env:
+          PG_CONTAINER: ${{ job.services.postgres.id }}
         run: |
           docker exec -i "$PG_CONTAINER" psql -X -v ON_ERROR_STOP=1 -U postgres -d worthkind_ci <<'SQL'
           SELECT worthkind_flow.register_hotel('Recovery test hotel','recovery-test','Recovery test hotel','Africa/Lagos','ci-recovery');
@@ -99,6 +101,8 @@ jobs:
           SELECT worthkind_flow.project_case_events(100);
           SQL
       - name: Backup and restore into a separate disposable database
+        env:
+          PG_CONTAINER: ${{ job.services.postgres.id }}
         shell: bash
         run: |
           set -euo pipefail
@@ -107,6 +111,8 @@ jobs:
           docker exec "$PG_CONTAINER" createdb -U postgres worthkind_restore_ci
           docker exec -i "$PG_CONTAINER" pg_restore -U postgres -d worthkind_restore_ci --exit-on-error < "$RUNNER_TEMP/flow-recovery.dump"
       - name: Assert recovered data and security boundaries
+        env:
+          PG_CONTAINER: ${{ job.services.postgres.id }}
         run: |
           docker exec -i "$PG_CONTAINER" psql -X -v ON_ERROR_STOP=1 -U postgres -d worthkind_restore_ci <<'SQL'
           DO $check$
