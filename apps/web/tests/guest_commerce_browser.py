@@ -21,6 +21,9 @@ def check_guest_commerce(browser, base):
         assert req.headers.get("authorization") is None
         if path == prefix + "/content":
             route.fulfill(json={"content":[{"key":"hotel","version":1,"content":{"title":"Synthetic hotel","body":"Approved fixture content"}},{"key":"privacy-policy","version":1,"content":{"title":"Synthetic privacy policy","body":"Fixture policy for consent tests only."}}]})
+        elif path == prefix + "/ai/chat":
+            assert req.post_data_json["consent_to_model_processing"] is True
+            route.fulfill(json={"status":"handoff","reason":"model_unavailable","answer":None,"sources":[],"action_executed":False,"human_contact_available_via_property":True})
         elif path == prefix + "/rooms":
             route.fulfill(json={"rooms":[{"id":ROOM,"name":"Synthetic deluxe","max_guests":2,"description":"Fixture room","display_rates":[{"amount_minor":5000000,"currency":"NGN","start_date":"2026-12-01","end_date":"2026-12-31"}]}]})
         elif path == prefix + "/menu":
@@ -150,5 +153,11 @@ def check_guest_commerce(browser, base):
     page.get_by_role("button", name="Submit application").click()
     expect(page.locator("#application-receipt")).to_contain_text("submitted")
     expect(page.get_by_role("button", name="Submit application")).to_be_disabled()
+    page.locator("#guest-ai-hotel").fill("hotel-a")
+    page.locator("#guest-ai-question").fill("What amenities are available?")
+    page.locator("#guest-ai-consent").check()
+    page.locator("#guest-ai-submit").click()
+    expect(page.locator("#guest-ai-answer")).to_contain_text("Contact hotel staff")
+    expect(page.locator("#guest-ai-answer")).to_contain_text("did not send a message")
     page.close()
     print("PASS: guest commerce catalog, receipt-scoped stay retry, withdrawal, venue request, preferences, feedback, application, and six viewport checks")
