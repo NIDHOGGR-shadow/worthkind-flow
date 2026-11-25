@@ -3,7 +3,7 @@ function guestApi(fetcher) {
   const slugPattern=/^[a-z0-9][a-z0-9-]{0,98}[a-z0-9]$|^[a-z0-9]$/;
   const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const proof=/^[A-Za-z0-9_-]{32,128}$/;
-  const states=new Set(["queued","claimed","responded"]);
+  const states=new Set(["queued","claimed","responded","escalated","resolved"]);
   const endpoint=slug=>{if(!slugPattern.test(slug))throw Error("Enter a valid hotel code.");return "/api/v1/properties/"+encodeURIComponent(slug)+"/enquiries";};
   async function request(url,options){
     let response;
