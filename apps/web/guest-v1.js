@@ -17,7 +17,7 @@
     el("v1-discard").hidden=!journey.pending;
     el("v1-discard").disabled=journey.busy;
     el("v1-recover").disabled=journey.busy||journey.pending||!!journey.active;
-    el("v1-refresh").disabled=journey.busy||!journey.active;
+    el("v1-refresh").disabled=journey.busy||commerce.busy||management.busy||native.busy||!journey.active;
     el("v1-new").disabled=journey.busy||commerce.busy||management.busy||native.busy;
     document.querySelectorAll("[data-service]").forEach(b=>{b.disabled=journey.busy||journey.pending||!!journey.active;});
   }
@@ -25,7 +25,7 @@
     const active=journey.active;
     commerce.activate();management.activate();native.activate();
     el("v1-track").hidden=false;
-    say("v1-case-status",statusText[result.status]+". No reservation, payment or external notification is confirmed.");
+    say("v1-case-status",statusText[result.status]+". This enquiry status does not establish booking, payment or notification status.");
     say("v1-reply",typeof result.staff_reply==="string"?result.staff_reply:"No staff response returned yet.");
     say("v1-receipt","Hotel: "+active.slug+"\nCase ID: "+active.case_id+"\nPrivate receipt token: "+active.token);
     if(focus){el("v1-receipt").hidden=true;el("v1-reveal").setAttribute("aria-expanded","false");say("v1-reveal","Show private receipt");el("track-heading").focus();}
@@ -49,7 +49,7 @@
     finally{controls();}
   });
   el("v1-refresh").addEventListener("click",async()=>{
-    if(journey.busy||commerce.busy||!journey.active)return;
+    if(journey.busy||commerce.busy||management.busy||native.busy||!journey.active)return;
     say("v1-case-status","Checking latest status…");
     try{const task=journey.refresh();controls();render(await task,false);}
     catch(err){say("v1-case-status",err.message+" The previous state is not newly verified.");}
@@ -62,7 +62,7 @@
     journey.reset();say("v1-submit-status","Unconfirmed request discarded locally. This did not cancel a server record.");controls();
   });
   el("v1-new").addEventListener("click",()=>{
-    if(journey.busy||commerce.busy||!journey.active)return;
+    if(journey.busy||commerce.busy||management.busy||native.busy||!journey.active)return;
     if((commerce.pending||management.pending)&&!window.confirm("An unconfirmed stay, venue, feedback or application request may exist. Starting over discards its local retry proof. Continue?"))return;
     if(!window.confirm("Have you saved the private receipt? Starting over removes it from this page."))return;
     journey.reset();commerce.reset();management.reset();native.reset();el("v1-form").reset();el("v1-recover-form").reset();el("v1-track").hidden=true;el("v1-receipt").hidden=true;say("v1-receipt","");say("v1-reply","");say("v1-case-status","");say("v1-recover-status","");say("v1-submit-status","Ready for a new request.");controls();el("v1-hotel").focus();
