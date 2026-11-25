@@ -12,6 +12,7 @@ import urllib.request
 import uuid
 from pathlib import Path
 from playwright.sync_api import sync_playwright, expect
+from staff_v1_browser import check_staff_v1
 
 ROOT = Path(__file__).resolve().parents[3]
 BASE = "http://127.0.0.1:8765"
@@ -126,6 +127,7 @@ def main():
                             if actual > width + 2:
                                 raise AssertionError(f"{route}: horizontal overflow at {width}px ({actual}px)")
                         page.close()
+                    check_staff_v1(browser, BASE)
                     browser.close()
                 print("PASS: browser guest/reception/receipt/property journey and 36 responsive route checks")
             finally:
