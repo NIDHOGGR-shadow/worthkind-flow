@@ -24,7 +24,7 @@ import pytest
 
 MIGRATIONS = [
     Path(__file__).resolve().parents[3] / "db" / "migrations" / name
-    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql")
+    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql")
 ]
 
 
@@ -51,6 +51,8 @@ def pg():
         conn.execute(
             "GRANT wf_auth_lookup,wf_staff_runtime,wf_staff_commands TO wf_ci_staff"
         )
+        conn.execute("CREATE ROLE wf_ci_lifecycle LOGIN NOINHERIT PASSWORD 'worthkind_ci_lifecycle_only'")
+        conn.execute("GRANT wf_staff_lifecycle TO wf_ci_lifecycle")
         yield conn
 
 
@@ -498,6 +500,7 @@ def oidc_rig(pg, seeded, monkeypatch, tmp_path):
     )
     monkeypatch.setenv("WF_GUEST_POSTGRES_DSN", guest_dsn)
     monkeypatch.setenv("WF_STAFF_POSTGRES_DSN", staff_dsn)
+    monkeypatch.setenv("WF_STAFF_LIFECYCLE_POSTGRES_DSN", make_conninfo(os.environ["WF_TEST_POSTGRES_DSN"], user="wf_ci_lifecycle", password="worthkind_ci_lifecycle_only"))
     monkeypatch.setenv("WF_DATA_KEY_B64", base64.b64encode(os.urandom(32)).decode())
     monkeypatch.setenv("WF_ENABLE_PG_GUEST_API", "1")
     monkeypatch.setenv("WF_DATABASE_PATH", str(tmp_path / "api.sqlite3"))
@@ -773,3 +776,30 @@ def test_suspended_organization_blocks_direct_runtime_reads(pg, seeded):
     with actor_session(pg, seeded["outsider"]):
         assert len(rows(pg, "guest_cases")) == 1
         assert rows(pg, "guest_cases")[0][0] == seeded["case_b"]
+
+
+def test_staff_invite_accept_revoke_and_audit(pg, oidc_rig):
+    client, key, source = oidc_rig
+    base = "/api/v1/properties/hotel-a/staff/memberships"
+    owner = auth_header(signed_token(key, "idp:hotel-a-owner"))
+    outsider = auth_header(signed_token(key, "idp:hotel-b-reception"))
+    body = {"provider_subject": "idp:hotel-b-reception", "role": "reception"}
+    assert client.post(base+"/invite", json=body, headers=outsider).status_code == 403
+    invite = client.post(base+"/invite", json=body, headers=owner)
+    assert invite.status_code == 201, invite.text
+    assert invite.json()["state"] == "invited"
+    assert client.post(base+"/invite", json=body, headers=owner).status_code == 409
+    cases = "/api/v1/properties/hotel-a/staff/cases"
+    assert client.get(cases, headers=outsider).status_code == 403
+    accepted = client.post(base+"/accept", headers=outsider)
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["state"] == "active"
+    assert client.get(cases, headers=outsider).status_code == 200
+    assert client.post(base+"/revoke", json={"provider_subject": "idp:hotel-a-owner"}, headers=outsider).status_code == 403
+    revoked = client.post(base+"/revoke", json={"provider_subject": body["provider_subject"]}, headers=owner)
+    assert revoked.status_code == 200, revoked.text
+    assert revoked.json()["state"] == "revoked"
+    assert client.get(cases, headers=outsider).status_code == 403
+    assert client.get("/api/v1/properties/hotel-b/staff/cases", headers=outsider).status_code == 200
+    actions = pg.execute("SELECT action FROM worthkind_flow.staff_membership_events WHERE membership_id=%s ORDER BY CASE action WHEN 'invited' THEN 1 WHEN 'activated' THEN 2 ELSE 3 END", (invite.json()["membership_id"],)).fetchall()
+    assert actions == [("invited",), ("activated",), ("revoked",)]
