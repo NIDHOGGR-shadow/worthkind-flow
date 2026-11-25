@@ -49,16 +49,30 @@ Q2 status: all currently available scoped staff API contracts implemented in sou
 - [x] Dining invoice, Paystack checkout link, provider verification, refund request/approval/submission/verification and finance exceptions.
 - [x] Separate test and live payment modes; exact HTTPS Paystack checkout-origin validation; no card data collection.
 - [x] Same-origin gateway allowlist for Q3 routes; session/property data cleanup; responsive catalog and operational forms.
-- [x] Initial nine commerce contract tests passed in GitHub Actions run 45699643768. Two additional catalog/channel tests and expanded guest/staff Chromium tests are committed; final execution not yet verified.
-- [ ] Final expanded browser acceptance and full visual inspection, including newly added catalog management.
-- [ ] Authoritative room holds, binding quotes, actual PMS booking/create/change/cancel, check-in/out write commands, guest dining order API, persistent guest venue tracking and broader folios/settlements. These do not exist in the scoped backend contract yet.
+- [x] Expanded commerce tests and 108 browser layout checks passed in GitHub Actions run 45700060628 (62/62 JavaScript tests).
+- [x] Expanded Q3 browser acceptance passed on the earlier revision. Full visual inspection and newest native-stay/provider browser coverage remain open.
+- [x] Native inventory holds, pay-at-property confirmation, date changes, cancellation, bookable rates, stay transitions, folios and stay invoices connected to versioned contracts. Cloudbeds reservation creation/cancellation/checkout-date and rate commands connected, with explicit authorization and no automatic retry of ambiguous writes.
+- [ ] Guest dining order API and persistent guest venue tracking still absent. Partial refunds and invoice voiding are available backend contracts but not yet connected to the frontend. Hosted booking/provider acceptance and final visual review remain open.
 - [ ] Real identity, deployed gateway, authorized PMS/Paystack activation and hosted property acceptance. No live provider operation is claimed.
-Q3 status: 10 of 13 tracked items implemented or evidenced; checklist count is not a production readiness or effort estimate. Source support for current APIs does not equal real provider activation. Do not advance a reservation request to confirmed without source authority.
+Q3 status: expanded implementation and prior automated verification complete for the recorded scope, with the remaining UI and hosted acceptance gaps explicitly open. Source support does not equal provider activation.
 
 ## Q4 — Business management and release readiness
-- [ ] Management analytics, CRM, website content, marketing, procurement and careers.
-- [ ] AI Studio, voice and human handoff, platform onboarding, billing, integrations and audit.
-- [ ] Full responsive visual and accessibility review, cross-workspace navigation and release tests.
-- [ ] Verify deployment; no simulated success or premature production release.
+- [x] Management overview using authorized records already loaded in the current session; not complete hotel analytics.
+- [x] Content draft/list/publish/reject/withdraw, source reference, and guest published catalog.
+- [x] Stock items, suppliers, purchase orders, stock movements, multi-item purchase batches and batch approval/cancellation.
+- [x] Published vacancies, current-session draft management and staff application decisions. Guest applications require a careers receipt and explicit application consent.
+- [x] Guest service preferences with revision checks and staff feedback review.
+- [x] Optional communication consent and withdrawal tied to the property's published privacy-policy content version. No policy text is invented; consent control remains unavailable without published content. Hotel-approved policy publication and legal review remain operational requirements.
+- [x] Cloudbeds stored evidence and command log, explicit provider writes and rate-job verification, Loyverse receipt reconciliation and Paystack settlement comparisons. No provider activation, OTA delivery or independent bank deposit is asserted.
+- [x] Native stay controls and folios integrated for newly available Q3 contracts.
+- [x] Property/session data cleanup, exact gateway allowlist and no automatic repeats of ambiguous PMS writes.
+- [x] CI run 45714203571 passed 81/81 JavaScript tests and 138 browser geometry checks (96 staff modules, 36 routes, six guest commerce widths); this is evidence for that revision, not the latest commit.
+- [x] Current source: 9 management, 7 native booking and 5 provider evidence tests passed in an isolated JavaScript harness. New Chromium fixture cases for native folio, batches, provider evidence and policy consent authored.
+- [ ] Final CI on the new revision and full screenshot/visual/accessibility review. Automated width checks do not substitute for this.
+- [ ] AI Studio, live voice/telephony, automated CRM campaigns/advertising, platform tenant administration/subscription billing, complete analytics and audit dashboards need versioned backend contracts. No fake controls introduced.
+- [ ] Staff private document storage UI, partial refunds and invoice voiding remain unconnected. Identity recovery/MFA, dedicated shift handover, guest-confirmed resolution and historical vacancy draft listing remain open.
+- [ ] Hosted frontend gateway, approved identity project, property isolation tests, provider activation, live acceptance and integration with backend PR #3. Do not mark a live deployment without verification.
+
+Q4 status: implemented and tested substantial property management and provider integration scope. Full release is not complete. PR #2 remains draft; all outstanding work is tracked here.
 
 Do not represent missing API contracts, provider activation or unexecuted tests as finished functionality. The existing development paths are not production identities or hotel connections.
