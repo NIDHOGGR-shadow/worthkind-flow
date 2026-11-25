@@ -82,6 +82,24 @@
       card.append(node("h3",t.subject||"Department ticket"),node("p",describe(t.category)+" · "+describe(t.priority)+" · "+describe(t.status),"staff-meta"),node("p",t.description||"No description returned."),node("p","Ticket "+t.id,"staff-meta"));
       if(t.due_at)card.append(node("p","Due: "+t.due_at+(t.overdue?" · Overdue":""),t.overdue?"staff-overdue":"staff-meta"));
       if(t.assignee)card.append(node("p","Assigned identity: "+t.assignee,"staff-meta"));
+      const history=node("div"),historyButton=node("button","Load ticket history","button secondary");
+      historyButton.type="button";history.setAttribute("aria-live","polite");
+      historyButton.addEventListener("click",async()=>{
+        history.replaceChildren();
+        await run(slug=>api.ticketDetail(slug,t.id),detail=>{
+          if(detail.origin_case_id)history.append(node("p","Linked enquiry: "+detail.origin_case_id,"staff-meta"));
+          history.append(node("h4","Activity history"));
+          if(!detail.history.length)history.append(node("p","No history returned."));
+          for(const event of detail.history){
+            const entry=node("div",undefined,"ticket-history-entry");
+            entry.append(node("p",describe(event.action)+" · "+dateLabel(event.created_at),"staff-meta"));
+            if(event.actor)entry.append(node("p","Actor: "+event.actor,"staff-meta"));
+            if(event.note)entry.append(node("p",event.note));
+            history.append(entry);
+          }
+          say("staff-message","Authorized ticket history loaded.");
+        });
+      });card.append(historyButton,history);
       const allowed={open:["claim"],assigned:["start"],in_progress:["resolve"],resolved:["reopen"],reopened:["claim"]}[t.status]||[];
       const label=node("label","Work note (optional for state changes)"),field=node("textarea");field.id="note-"+t.id;label.htmlFor=field.id;field.rows=2;field.maxLength=1500;
       card.append(label,field);const row=node("div",undefined,"actions");
