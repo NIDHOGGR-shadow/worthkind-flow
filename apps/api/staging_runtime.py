@@ -1,6 +1,7 @@
 """Hosted staging dependency probe. Does not provision or expose secrets."""
 import os
 import psycopg
+from psycopg.conninfo import conninfo_to_dict
 from guest_postgres import _configured_key,_keyring
 
 ROLE_CONNECTIONS = (
@@ -27,10 +28,16 @@ def staging_ready():
             dsn = os.getenv(env)
             if not dsn:
                 return False
+            params = conninfo_to_dict(dsn)
+            if params.get("sslmode") != "verify-full":
+                return False
             # SQL role is a constant from ROLE_CONNECTIONS, never user input.
             with psycopg.connect(dsn,connect_timeout=2) as conn:
                 with conn.transaction():
                     conn.execute("SET LOCAL statement_timeout = '2s'")
+                    login = conn.execute("SELECT session_user,rolsuper,rolcreaterole,rolcreatedb,rolbypassrls,rolreplication,rolinherit FROM pg_roles WHERE rolname=session_user").fetchone()
+                    if login is None or any(login[1:]):
+                        return False
                     conn.execute("SET LOCAL ROLE " + role)
                     if conn.execute("SELECT current_user").fetchone()[0] != role:
                         return False
