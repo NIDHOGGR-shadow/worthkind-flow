@@ -95,7 +95,10 @@ def install_pos_routes(app):
         subject=actor(authorization)
         expected=command("SELECT * FROM worthkind_flow.staff_pos_account(%s,%s,%s)",(subject,slug,order_id))
         cfg=account(slug,expected)
-        view=receipt_view(cfg,body.receipt_number,fetch(cfg,body.receipt_number))
+        raw=fetch(cfg,body.receipt_number)
+        if isinstance(raw,dict) and raw.get('cancelled_at') is not None:
+            raise HTTPException(409,'Cancelled receipt cannot be linked; refresh existing evidence instead')
+        view=receipt_view(cfg,body.receipt_number,raw)
         evidence=record(subject,slug,order_id,cfg,body.receipt_number,view)
         return {"evidence":evidence,"payment_settled_by_this_action":False,"source":"loyverse"}
 
