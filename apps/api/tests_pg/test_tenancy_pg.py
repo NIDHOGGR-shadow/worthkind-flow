@@ -24,7 +24,7 @@ import pytest
 
 MIGRATIONS = [
     Path(__file__).resolve().parents[3] / "db" / "migrations" / name
-    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql", "008_hotel_onboarding_settings.sql", "009_identity_provisioning.sql", "010_guest_quota.sql", "011_private_documents.sql", "012_operational_tickets.sql", "013_content_catalog.sql")
+    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql", "008_hotel_onboarding_settings.sql", "009_identity_provisioning.sql", "010_guest_quota.sql", "011_private_documents.sql", "012_operational_tickets.sql", "013_content_catalog.sql", "014_rooms_rates.sql")
 ]
 
 
@@ -933,3 +933,31 @@ def test_content_approval_and_publication_boundary(pg, oidc_rig, monkeypatch):
     assert client.get("/api/v1/properties/hotel-b/content").json()["content"]==[]
     assert client.post(decision,json={"action":"withdraw"},headers=owner).status_code==200
     assert client.get(public).json()["content"]==[]
+
+
+def test_room_catalog_and_housekeeping_authority(pg, oidc_rig, monkeypatch):
+    client,key,source=oidc_rig
+    monkeypatch.setenv("WF_OPERATIONS_POSTGRES_DSN",os.environ["WF_STAFF_POSTGRES_DSN"])
+    monkeypatch.setenv("WF_PUBLIC_CONTENT_POSTGRES_DSN",os.environ["WF_GUEST_POSTGRES_DSN"])
+    owner=auth_header(signed_token(key,"idp:hotel-a-owner"))
+    house=auth_header(signed_token(key,"idp:hotel-a-housekeeper"))
+    other=auth_header(signed_token(key,"idp:hotel-b-reception"))
+    base="/api/v1/properties/hotel-a"
+    body={"code":"standard","name":"Standard room","max_guests":2,"published":True,"revision":0}
+    r=client.put(base+"/staff/room-types",json=body,headers=owner)
+    assert r.status_code==200,r.text
+    tid=r.json()["id"]
+    assert client.put(base+"/staff/room-types",json=body,headers=house).status_code==403
+    r=client.post(base+"/staff/rooms",json={"room_type_id":tid,"label":"101"},headers=owner)
+    assert r.status_code==201,r.text
+    room=r.json()["id"]
+    assert client.put(base+"/staff/rooms/"+room+"/state",json={"state":"out_of_service","revision":1},headers=house).status_code==403
+    assert client.put(base+"/staff/rooms/"+room+"/state",json={"state":"clean","revision":1},headers=house).status_code==200
+    assert client.put(base+"/staff/rooms/"+room+"/state",json={"state":"dirty","revision":1},headers=house).status_code==409
+    assert client.get(base+"/staff/rooms",headers=other).status_code==403
+    r=client.put(base+"/staff/display-rates",json={"room_type_id":tid,"code":"rack","currency":"NGN","amount_minor":2500000,"start_date":"2026-01-01","end_date":"2099-01-01","revision":0},headers=owner)
+    assert r.status_code==200,r.text
+    data=client.get(base+"/rooms").json()
+    assert data["rooms"][0]["display_rates"][0]["amount_minor"]==2500000
+    assert data["live_availability"] is False and data["rates_binding"] is False
+    assert client.get("/api/v1/properties/hotel-b/rooms").json()["rooms"]==[]
