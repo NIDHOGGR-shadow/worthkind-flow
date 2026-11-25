@@ -11,8 +11,9 @@
   const commerce=initStaffCommerce({session:()=>session,ctx,run,mutate});
   const management=initStaffManagement({session:()=>session,ctx,run,mutate});
   const native=initNativeStaff({session:()=>session,ctx,run,mutate});
+  const evidence=initProviderEvidence({session:()=>session,ctx,run,mutate});
   function clearData(){
-    commerce.clear();management.clear();native.clear();
+    commerce.clear();management.clear();native.clear();evidence.clear();
     roster=null;rooms=null;range=null;el("staff-roster").replaceChildren();el("staff-shifts").replaceChildren();el("staff-rooms").replaceChildren();el("staff-profile-form").reset();el("shift-form").reset();el("schedule-range").reset();
     cases=null;tickets=null;settings=null;
     el("v1-cases").replaceChildren();el("v1-tickets").replaceChildren();
@@ -123,7 +124,7 @@
     if(!ctx.slug){say("staff-message","Select a hotel code first.");return false;}
     const stamp=ctx.stamp();say("staff-message",loading);
     try{const task=ctx.run(op);controls();const data=await task;if(!ctx.isCurrent(stamp)||!session.signedIn)return false;apply(data);return true;}
-    catch(e){if(!ctx.isCurrent(stamp))return false;if(e.status===401){localExit("Session expired or rejected. Sign in again.");return false;}if(e.status===403){commerce.clear();management.clear();native.clear();roster=null;rooms=null;renderSchedule();renderRooms();cases=null;tickets=null;settings=null;renderCases();renderTickets();el("settings-form").hidden=true;say("case-summary","Access must be verified again.");say("membership-result","");}say("staff-message",e.message);return false;}
+    catch(e){if(!ctx.isCurrent(stamp))return false;if(e.status===401){localExit("Session expired or rejected. Sign in again.");return false;}if(e.status===403){commerce.clear();management.clear();native.clear();evidence.clear();roster=null;rooms=null;renderSchedule();renderRooms();cases=null;tickets=null;settings=null;renderCases();renderTickets();el("settings-form").hidden=true;say("case-summary","Access must be verified again.");say("membership-result","");}say("staff-message",e.message);return false;}
     finally{controls();}
   }
   async function loadCases(){
@@ -204,7 +205,7 @@
   async function membership(action){
     if(ctx.busy)return;const subject=el("member-subject").value.trim(),role=el("member-role").value;
     if(action==="revoke"&&!confirm("Revoke this identity's membership of "+ctx.slug+"?"))return;
-    await run(slug=>api.membership(slug,action,subject,role),d=>{say("membership-result","Membership "+d.membership_id+" · "+d.role+" · "+d.state);say("staff-message","Membership command confirmed. No account or email delivery is implied.");if(action==="revoke"){commerce.clear();management.clear();native.clear();roster=null;rooms=null;renderSchedule();renderRooms();cases=null;tickets=null;settings=null;renderCases();renderTickets();el("settings-form").hidden=true;}});
+    await run(slug=>api.membership(slug,action,subject,role),d=>{say("membership-result","Membership "+d.membership_id+" · "+d.role+" · "+d.state);say("staff-message","Membership command confirmed. No account or email delivery is implied.");if(action==="revoke"){commerce.clear();management.clear();native.clear();evidence.clear();roster=null;rooms=null;renderSchedule();renderRooms();cases=null;tickets=null;settings=null;renderCases();renderTickets();el("settings-form").hidden=true;}});
   }
   el("membership-form").addEventListener("submit",e=>{e.preventDefault();membership("invite");});el("accept-membership").addEventListener("click",()=>membership("accept"));el("revoke-membership").addEventListener("click",()=>membership("revoke"));
   el("login-form").addEventListener("submit",async e=>{
