@@ -1,0 +1,67 @@
+name: Flow database recovery rehearsal
+on:
+  pull_request:
+    paths:
+      - 'db/**'
+      - '.github/workflows/database-recovery.yml'
+  push:
+    branches: ['work/backend-infrastructure-hardening']
+    paths:
+      - 'db/**'
+      - '.github/workflows/database-recovery.yml'
+permissions:
+  contents: read
+jobs:
+  restore-rehearsal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: disposable_ci_only
+          POSTGRES_DB: worthkind_ci
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PG_CONTAINER: ${{ job.services.postgres.id }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply all repository migrations to disposable database
+        shell: bash
+        run: |
+          set -euo pipefail
+          for file in db/migrations/*.sql; do
+            docker exec -i "$PG_CONTAINER" psql -X -v ON_ERROR_STOP=1 -U postgres -d worthkind_ci < "$file"
+          done
+      - name: Seed only disposable recovery evidence
+        run: |
+          docker exec -i "$PG_CONTAINER" psql -X -v ON_ERROR_STOP=1 -U postgres -d worthkind_ci <<'SQL'
+          SELECT worthkind_flow.register_hotel('Recovery test hotel','recovery-test','Recovery test hotel','Africa/Lagos','ci-recovery');
+          SELECT worthkind_flow.activate_hotel('recovery-test','ci-recovery-owner','ci-recovery','ci-evidence-only');
+          SELECT * FROM worthkind_flow.create_guest_case('recovery-test','recovery-test-request',repeat('a',64),repeat('b',64),'booking');
+          SELECT worthkind_flow.project_case_events(100);
+          SQL
+      - name: Backup and restore into a separate disposable database
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker exec "$PG_CONTAINER" pg_dump -U postgres -d worthkind_ci -n worthkind_flow -Fc > "$RUNNER_TEMP/flow-recovery.dump"
+          test -s "$RUNNER_TEMP/flow-recovery.dump"
+          docker exec "$PG_CONTAINER" createdb -U postgres worthkind_restore_ci
+          docker exec -i "$PG_CONTAINER" pg_restore -U postgres -d worthkind_restore_ci --exit-on-error < "$RUNNER_TEMP/flow-recovery.dump"
+      - name: Assert recovered data and security boundaries
+        run: |
+          docker exec -i "$PG_CONTAINER" psql -X -v ON_ERROR_STOP=1 -U postgres -d worthkind_restore_ci <<'SQL'
+          DO $check$
+          BEGIN
+            IF (SELECT count(*) FROM worthkind_flow.guest_cases) <> 1 THEN RAISE EXCEPTION 'Missing case'; END IF;
+            IF (SELECT count(*) FROM worthkind_flow.case_activity) <> 1 THEN RAISE EXCEPTION 'Missing activity'; END IF;
+            IF (SELECT count(*) FROM worthkind_flow.event_outbox WHERE event_state='pending') <> 1 THEN RAISE EXCEPTION 'Incorrect delivery status'; END IF;
+            IF (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='worthkind_flow' AND c.relkind='r' AND NOT(c.relrowsecurity AND c.relforcerowsecurity)) <> 0 THEN RAISE EXCEPTION 'RLS not restored'; END IF;
+            IF NOT EXISTS(SELECT 1 FROM worthkind_flow.resolve_staff_session('ci-recovery-owner','recovery-test','case:read') WHERE membership_role='owner') THEN RAISE EXCEPTION 'Membership not restored'; END IF;
+          END $check$;
+          SQL
