@@ -13,6 +13,7 @@ import jwt
 import psycopg
 from psycopg import errors
 from guest_postgres import encrypt_json, decrypt_json
+from supabase_identity import verified_supabase_subject, IdentityRejected, IdentityUnavailable
 
 
 class StaffTokenRejected(ValueError):
@@ -37,6 +38,16 @@ def verified_provider_subject(authorization: str | None) -> str:
     Rejects unsigned/HMAC tokens, unknown kid, remote key URLs and untrusted
     claims. Never accepts roles or tenant authorization from token payload.
     """
+    mode = os.getenv("WF_IDENTITY_PROVIDER", "oidc")
+    if mode == "supabase":
+        try:
+            return verified_supabase_subject(authorization)
+        except IdentityRejected:
+            raise StaffTokenRejected("Bearer token rejected") from None
+        except IdentityUnavailable:
+            raise StaffAuthConfigurationError("Supabase identity unavailable") from None
+    if mode != "oidc":
+        raise StaffAuthConfigurationError("Unknown identity provider")
     if not authorization or not authorization.startswith("Bearer "):
         raise StaffTokenRejected("Bearer token required")
     parts = authorization.split()
