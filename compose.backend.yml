@@ -29,6 +29,16 @@ services:
       WF_PMS_PROVIDER_POSTGRES_DSN: ${WF_PMS_PROVIDER_POSTGRES_DSN:-}
       WF_POS_PROVIDER_POSTGRES_DSN: ${WF_POS_PROVIDER_POSTGRES_DSN:-}
       WF_LOYVERSE_ACCOUNTS_JSON: ${WF_LOYVERSE_ACCOUNTS_JSON:-}
+      WF_AI_GATEWAY_POSTGRES_DSN: ${WF_AI_GATEWAY_POSTGRES_DSN:-}
+      WF_AI_POLICY_POSTGRES_DSN: ${WF_AI_POLICY_POSTGRES_DSN:-}
+      WF_MODAL_ENABLED: ${WF_MODAL_ENABLED:-0}
+      WF_MODAL_CHAT_URL: ${WF_MODAL_CHAT_URL:-}
+      WF_MODAL_CHAT_MODEL: ${WF_MODAL_CHAT_MODEL:-}
+      WF_MODAL_PROXY_KEY: ${WF_MODAL_PROXY_KEY:-}
+      WF_MODAL_PROXY_SECRET: ${WF_MODAL_PROXY_SECRET:-}
+      WF_MODAL_VOICE_ENABLED: ${WF_MODAL_VOICE_ENABLED:-0}
+      WF_MODAL_ASR_URL: ${WF_MODAL_ASR_URL:-}
+      WF_MODAL_TTS_URL: ${WF_MODAL_TTS_URL:-}
     ports:
       - "127.0.0.1:8000:8000"
     read_only: true
@@ -70,6 +80,24 @@ services:
       WF_POS_SYNC_ENABLED: '1'
       WF_POS_SYNC_POSTGRES_DSN: ${WF_POS_SYNC_POSTGRES_DSN:-}
       WF_LOYVERSE_ACCOUNTS_JSON: ${WF_LOYVERSE_ACCOUNTS_JSON:-}
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  ai-automation:
+    profiles: ["ai-automation"]
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    command: ["python","ai_automation_worker.py"]
+    environment:
+      WF_AI_AUTOMATION_ENABLED: '1'
+      WF_AI_AUTOMATION_POSTGRES_DSN: ${WF_AI_AUTOMATION_POSTGRES_DSN:-}
     read_only: true
     tmpfs:
       - /tmp
