@@ -550,3 +550,6 @@ install_native_booking_routes(app)
 
 from loyverse_pg import install_pos_routes
 install_pos_routes(app)
+
+from cloudbeds_pg import install_pms_evidence_routes
+install_pms_evidence_routes(app)
