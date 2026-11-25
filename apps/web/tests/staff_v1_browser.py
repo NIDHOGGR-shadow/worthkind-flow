@@ -79,6 +79,21 @@ def check_staff_v1(browser, base):
             assert request.post_data_json == {"action":"publish"}
             state["content"]="published"
             route.fulfill(json={"id":CASE_ID,"state":"published"})
+        elif path == prefix + "/ai/policy":
+            if request.method == "PUT":
+                assert request.post_data_json["revision"] == 1
+                assert request.post_data_json["staff_assist"] is True
+                state["ai_policy"] = {**request.post_data_json,"revision":2}
+            route.fulfill(json=state.get("ai_policy",{"revision":1,"guest_chat":False,"staff_assist":False,"autonomous_alerts":False,"voice_enabled":False,"max_calls_per_day":20}))
+        elif path == prefix + "/ai/chat":
+            assert request.post_data_json["consent_to_model_processing"] is True
+            route.fulfill(json={"status":"answered","answer":"Synthetic approved hotel information","answer_type":"approved_content_excerpt","sources":[{"id":CASE_ID,"key":"hotel","title":"Synthetic source","version":1}],"action_executed":False})
+        elif path == prefix + "/documents" and request.method == "POST":
+            assert request.headers.get("content-type") == "application/octet-stream"
+            assert request.post_data_buffer == b"fixture bytes"
+            route.fulfill(status=201,json={"document_id":CASE_ID,"size":13})
+        elif path == prefix + "/documents/" + CASE_ID:
+            route.fulfill(status=200,body=b"fixture bytes",headers={"Content-Type":"application/octet-stream","Content-Disposition":"attachment"})
         elif path == prefix + "/purchase-batches":
             if request.method == "POST":
                 assert len(request.post_data_json["lines"]) == 1
@@ -345,7 +360,24 @@ def check_staff_v1(browser, base):
     expect(page.locator("#pos-evidence-list")).to_contain_text("Receipt matched")
     page.locator("#pms-command-load").click()
     expect(page.locator("#pms-command-list")).to_contain_text("Investigate provider outcome")
-    for label in ("Reception", "Department work", "Memberships", "Staff schedule", "Room readiness", "Hotel settings","Reservations","Catalog","Dining","Events","Finance","Management","Website content","Procurement","Careers","Guest feedback","Native bookings","Integrations"):
+    page.get_by_role("button", name="AI Studio", exact=True).click()
+    page.locator("#ai-policy-load").click()
+    expect(page.locator("#ai-policy-form")).to_be_visible()
+    page.locator("#ai-staff-assist").check()
+    page.get_by_role("button", name="Save AI policy").click()
+    expect(page.locator("#ai-policy-revision")).to_contain_text("Revision 2")
+    page.locator("#ai-staff-question").fill("What hotel information is approved?")
+    page.locator("#ai-staff-consent").check()
+    page.get_by_role("button", name="Ask assistant", exact=True).click()
+    expect(page.locator("#ai-staff-answer")).to_contain_text("Synthetic approved hotel information")
+    page.get_by_role("button", name="Documents", exact=True).click()
+    page.locator("#document-file").set_input_files({"name":"fixture.bin","mimeType":"application/octet-stream","buffer":b"fixture bytes"})
+    page.locator("#document-upload-submit").click()
+    expect(page.locator("#document-id")).to_have_value(CASE_ID)
+    page.locator("#document-download-submit").click()
+    expect(page.locator("#document-download-link")).to_be_visible()
+    expect(page.locator("#document-download-link")).to_have_attribute("download","private-document-"+CASE_ID+".bin")
+    for label in ("Reception", "Department work", "Memberships", "Staff schedule", "Room readiness", "Hotel settings","Reservations","Catalog","Dining","Events","Finance","Management","Website content","Procurement","Careers","Guest feedback","Native bookings","Integrations","AI Studio","Documents"):
         page.get_by_role("button", name=label, exact=True).click()
         for width in WIDTHS:
             page.set_viewport_size({"width": width, "height": 900})
@@ -367,6 +399,9 @@ def check_staff_v1(browser, base):
     expect(page.locator("#application-records")).to_be_empty()
     expect(page.locator("#management-summary")).to_be_empty()
     expect(page.locator("#procurement-records")).to_be_empty()
+    expect(page.locator("#ai-staff-answer")).to_be_empty()
+    expect(page.locator("#document-download-link")).to_be_hidden()
+    expect(page.locator("#document-id")).to_have_value("")
     page.get_by_role("button", name="Reception", exact=True).click()
     page.locator("#load-cases").click()
     expect(page.locator("#staff-message")).to_contain_text("not authorized")
@@ -376,4 +411,4 @@ def check_staff_v1(browser, base):
     expect(page.locator("#staff-workspace")).to_be_hidden()
     assert all(path.startswith("/api/v1/") for _, path in calls)
     page.close()
-    print("PASS: staff v1 Chromium fixture journey and 108 authenticated-layout checks")
+    print("PASS: staff v1 Chromium fixture journey and 120 authenticated-layout checks")
