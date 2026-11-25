@@ -14,7 +14,7 @@ function guestApi(fetcher) {
       throw Error(messages[response.status]||"The service could not confirm this request.");
     }
     let data;try{data=await response.json()}catch{throw Error("The service returned an unreadable response.");}
-    if(!data||!uuid.test(data.case_id)||!states.has(data.status))throw Error("The service returned an unexpected request state.");
+    if(!data||typeof data.case_id!=="string"||!uuid.test(data.case_id)||!states.has(data.status))throw Error("The service returned an unexpected request state.");
     return data;
   }
   return {
