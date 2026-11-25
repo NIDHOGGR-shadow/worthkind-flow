@@ -79,6 +79,23 @@ def check_staff_v1(browser, base):
             assert request.post_data_json == {"action":"publish"}
             state["content"]="published"
             route.fulfill(json={"id":CASE_ID,"state":"published"})
+        elif path == prefix + "/purchase-batches":
+            if request.method == "POST":
+                assert len(request.post_data_json["lines"]) == 1
+                state["batch"] = True
+                route.fulfill(json={"id":CASE_ID})
+            else:
+                route.fulfill(json={"batches":[{"id":CASE_ID,"supplier_id":MEMBER_ID,"currency":"NGN","lines":[{"order_id":CASE_ID,"item_id":TICKET_ID,"quantity":"2","received_quantity":"0","unit_price_minor":10000,"state":"requested"}]}] if state.get("batch") else []})
+        elif path == prefix + "/pms/reservation-evidence":
+            route.fulfill(json={"source":"last_verified_cloudbeds_readback","reservations":[{"id":CASE_ID,"external_reservation_id":"PMS-TEST","provider_state":"confirmed","arrival":"2026-12-01","departure":"2026-12-03","retrieved_at":"2026-11-25T22:00:00Z"}]})
+        elif path == prefix + "/pos/reconciliation":
+            route.fulfill(json={"source":"loyverse","receipts":[{"id":CASE_ID,"order_id":TICKET_ID,"receipt_number":"POS-TEST","matched":True,"amount_minor":500000,"currency":"NGN","recorded_at":"2026-11-25T22:00:00Z"}]})
+        elif path == prefix + "/pms/commands":
+            route.fulfill(json={"commands":[{"id":CASE_ID,"operation":"create","state":"unknown","created_at":"2026-11-25T22:00:00Z"}]})
+        elif path == prefix + "/native-bookings":
+            route.fulfill(json={"source":"native_inventory","bookings":[{"id":CASE_ID,"state":"confirmed","arrival":"2026-12-01","departure":"2026-12-03","room_count":1,"currency":"NGN","total_minor":5000000,"revision":2}]})
+        elif path == prefix + "/native-bookings/" + CASE_ID + "/folio":
+            route.fulfill(json={"booking_id":CASE_ID,"booking_state":"confirmed","arrival":"2026-12-01","departure":"2026-12-03","currency":"NGN","contract_total_minor":5000000,"rooms":[],"stay":None,"invoice":None,"unlinked_service_charges_excluded":True})
         elif path == prefix + "/procurement":
             route.fulfill(json={"items":[{"id":TICKET_ID,"sku":"TEST","name":"Synthetic stock","unit":"kg","balance":state.get("balance","2.000"),"reorder_level":"3.000","active":True}],"suppliers":[{"id":MEMBER_ID,"name":"Synthetic supplier","external_reference":"fixture","state":"approved"}],"orders":[]})
         elif path == prefix + "/stock/movements":
@@ -310,7 +327,25 @@ def check_staff_v1(browser, base):
     page.get_by_role("button", name="Management", exact=True).click()
     page.locator("#management-refresh").click()
     expect(page.locator("#management-summary")).to_contain_text("Items at/below reorder level")
-    for label in ("Reception", "Department work", "Memberships", "Staff schedule", "Room readiness", "Hotel settings","Reservations","Catalog","Dining","Events","Finance","Management","Website content","Procurement","Careers","Guest feedback"):
+    page.get_by_role("button", name="Procurement", exact=True).click()
+    page.locator("#batch-supplier").fill(MEMBER_ID)
+    page.locator("#batch-lines [data-field=item_id]").fill(TICKET_ID)
+    page.locator("#batch-lines [data-field=quantity]").fill("2")
+    page.locator("#batch-lines [data-field=unit_price_minor]").fill("10000")
+    page.locator("#batch-submit").click()
+    expect(page.locator("#purchase-batch-records")).to_contain_text("Purchase batch")
+    page.get_by_role("button", name="Native bookings", exact=True).click()
+    page.locator("#native-staff-load").click()
+    page.get_by_role("button", name="Load stay and folio").click()
+    expect(page.locator("#native-staff-list")).to_contain_text("Unlinked service charges are excluded")
+    page.get_by_role("button", name="Integrations", exact=True).click()
+    page.locator("#pms-evidence-load").click()
+    expect(page.locator("#pms-evidence-list")).to_contain_text("PMS-TEST")
+    page.locator("#pos-evidence-load").click()
+    expect(page.locator("#pos-evidence-list")).to_contain_text("Receipt matched")
+    page.locator("#pms-command-load").click()
+    expect(page.locator("#pms-command-list")).to_contain_text("Investigate provider outcome")
+    for label in ("Reception", "Department work", "Memberships", "Staff schedule", "Room readiness", "Hotel settings","Reservations","Catalog","Dining","Events","Finance","Management","Website content","Procurement","Careers","Guest feedback","Native bookings","Integrations"):
         page.get_by_role("button", name=label, exact=True).click()
         for width in WIDTHS:
             page.set_viewport_size({"width": width, "height": 900})
@@ -341,4 +376,4 @@ def check_staff_v1(browser, base):
     expect(page.locator("#staff-workspace")).to_be_hidden()
     assert all(path.startswith("/api/v1/") for _, path in calls)
     page.close()
-    print("PASS: staff v1 Chromium fixture journey and 96 authenticated-layout checks")
+    print("PASS: staff v1 Chromium fixture journey and 108 authenticated-layout checks")
