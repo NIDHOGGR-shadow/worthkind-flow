@@ -24,7 +24,7 @@ import pytest
 
 MIGRATIONS = [
     Path(__file__).resolve().parents[3] / "db" / "migrations" / name
-    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql", "008_hotel_onboarding_settings.sql", "009_identity_provisioning.sql", "010_guest_quota.sql", "011_private_documents.sql", "012_operational_tickets.sql", "013_content_catalog.sql", "014_rooms_rates.sql", "015_rate_lookup_qualification.sql", "016_inventory_procurement.sql", "017_dining_kitchen.sql", "018_menu_lock_qualification.sql", "019_department_roles.sql", "020_staff_shifts.sql", "021_guest_preferences_feedback.sql", "022_reservation_intents.sql", "023_hotel_finance.sql", "024_events_recruitment.sql", "025_pms_accounts.sql", "026_reception_controls.sql", "027_payment_mode_boundaries.sql", "028_operations_read_contracts.sql", "029_native_booking_inventory.sql", "030_native_booking_changes.sql")
+    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql", "008_hotel_onboarding_settings.sql", "009_identity_provisioning.sql", "010_guest_quota.sql", "011_private_documents.sql", "012_operational_tickets.sql", "013_content_catalog.sql", "014_rooms_rates.sql", "015_rate_lookup_qualification.sql", "016_inventory_procurement.sql", "017_dining_kitchen.sql", "018_menu_lock_qualification.sql", "019_department_roles.sql", "020_staff_shifts.sql", "021_guest_preferences_feedback.sql", "022_reservation_intents.sql", "023_hotel_finance.sql", "024_events_recruitment.sql", "025_pms_accounts.sql", "026_reception_controls.sql", "027_payment_mode_boundaries.sql", "028_operations_read_contracts.sql", "029_native_booking_inventory.sql", "030_native_booking_changes.sql", "031_pos_receipt_evidence.sql", "032_purchase_batches.sql")
 ]
 
 
@@ -1162,3 +1162,26 @@ def test_native_hold_confirm_and_atomic_change(pg, oidc_rig, monkeypatch):
     assert result.status_code==200,result.text
     assert result.json()["booking"]["total_minor"]==7500000
     assert client.post(base+"/staff/native-bookings/"+booking+"/cancel",json={"revision":3,"reason":"Disposable cancellation"},headers=owner).status_code==200
+
+
+def test_purchase_batch_replay_and_approval(pg, oidc_rig, monkeypatch):
+    client,key,source=oidc_rig
+    monkeypatch.setenv("WF_OPERATIONS_POSTGRES_DSN",os.environ["WF_STAFF_POSTGRES_DSN"])
+    owner=auth_header(signed_token(key,"idp:hotel-a-owner"))
+    base="/api/v1/properties/hotel-a/staff"
+    items=[]
+    for sku in ("batch-rice","batch-oil"):
+        r=client.post(base+"/stock/items",json={"sku":sku,"name":sku,"unit":"kg"},headers=owner)
+        assert r.status_code==201,r.text
+        items.append(r.json()["id"])
+    supplier=client.post(base+"/suppliers",json={"name":"Batch supplier","external_reference":"batch-supplier"},headers=owner).json()["id"]
+    assert client.put(base+"/suppliers/"+supplier+"/state",json={"state":"approved"},headers=owner).status_code==200
+    body={"supplier_id":supplier,"currency":"NGN","request_key":"batch-test-001","lines":[{"item_id":i,"quantity":"10","unit_price_minor":1000} for i in items]}
+    r=client.post(base+"/purchase-batches",json=body,headers=owner)
+    assert r.status_code==201,r.text
+    batch=r.json()["id"]
+    body["lines"].reverse()
+    assert client.post(base+"/purchase-batches",json=body,headers=owner).json()["id"]==batch
+    assert client.post(base+"/purchase-batches/"+batch+"/decision",json={"action":"approve"},headers=owner).status_code==200
+    data=client.get(base+"/purchase-batches",headers=owner).json()["batches"]
+    assert len(data[0]["lines"])==2 and all(x["state"]=="approved" for x in data[0]["lines"])
