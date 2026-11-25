@@ -49,7 +49,7 @@ function createGuestJourney(api,randomHex){
       try{
         const result=await api.submit(pending.slug,pending.body);
         if(generation!==epoch)throw Error("Request context changed.");
-        active={slug,case_id:result.case_id,token:pending.body.receipt_token};
+        active={slug,case_id:result.case_id,token:pending.body.receipt_token,kind:result.kind||pending.body.kind};
         pending=null;
         return result;
       }finally{busy=false;}
@@ -60,7 +60,7 @@ function createGuestJourney(api,randomHex){
       try{
         const result=await api.status(slug,id,token);
         if(generation!==epoch)throw Error("Request context changed.");
-        active={slug,case_id:result.case_id,token};
+        active={slug,case_id:result.case_id,token,kind:result.kind||active?.kind};
         return result;
       }finally{busy=false;}
     },
