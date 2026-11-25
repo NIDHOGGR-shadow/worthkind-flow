@@ -24,7 +24,7 @@ import pytest
 
 MIGRATIONS = [
     Path(__file__).resolve().parents[3] / "db" / "migrations" / name
-    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql")
+    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql")
 ]
 
 
@@ -53,6 +53,8 @@ def pg():
         )
         conn.execute("CREATE ROLE wf_ci_lifecycle LOGIN NOINHERIT PASSWORD 'worthkind_ci_lifecycle_only'")
         conn.execute("GRANT wf_staff_lifecycle TO wf_ci_lifecycle")
+        conn.execute("CREATE ROLE wf_ci_projector LOGIN NOINHERIT PASSWORD 'worthkind_ci_projector_only'")
+        conn.execute("GRANT wf_event_projector TO wf_ci_projector")
         yield conn
 
 
@@ -803,3 +805,23 @@ def test_staff_invite_accept_revoke_and_audit(pg, oidc_rig):
     assert client.get("/api/v1/properties/hotel-b/staff/cases", headers=outsider).status_code == 200
     actions = pg.execute("SELECT action FROM worthkind_flow.staff_membership_events WHERE membership_id=%s ORDER BY CASE action WHEN 'invited' THEN 1 WHEN 'activated' THEN 2 ELSE 3 END", (invite.json()["membership_id"],)).fetchall()
     assert actions == [("invited",), ("activated",), ("revoked",)]
+
+
+def test_internal_event_projection_is_atomic_and_idempotent(pg, oidc_rig):
+    from event_projector import project_batch
+    from concurrent.futures import ThreadPoolExecutor
+    client, key, source = oidc_rig
+    for i in range(6):
+        pg.execute("INSERT INTO worthkind_flow.event_outbox(property_id,case_id,event_type) VALUES (%s,%s,%s)", (source["property_a"], source["case_a"], "case_created"))
+    dsn = make_conninfo(os.environ["WF_TEST_POSTGRES_DSN"], user="wf_ci_projector", password="worthkind_ci_projector_only")
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda _: project_batch(dsn, 3), range(2)))
+    assert sum(results) == 6
+    assert project_batch(dsn) == 0
+    assert pg.execute("SELECT count(*) FROM worthkind_flow.case_activity").fetchone()[0] == 6
+    assert pg.execute("SELECT count(*) FROM worthkind_flow.event_outbox WHERE projected_at IS NOT NULL AND event_state='pending'").fetchone()[0] == 6
+    with psycopg.connect(dsn) as conn:
+        with pytest.raises(errors.InsufficientPrivilege):
+            with conn.transaction():
+                conn.execute("SET LOCAL ROLE wf_event_projector")
+                conn.execute("SELECT * FROM worthkind_flow.guest_cases")
