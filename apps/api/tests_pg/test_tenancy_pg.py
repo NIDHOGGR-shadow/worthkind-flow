@@ -24,7 +24,7 @@ import pytest
 
 MIGRATIONS = [
     Path(__file__).resolve().parents[3] / "db" / "migrations" / name
-    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql", "008_hotel_onboarding_settings.sql", "009_identity_provisioning.sql", "010_guest_quota.sql", "011_private_documents.sql", "012_operational_tickets.sql", "013_content_catalog.sql", "014_rooms_rates.sql", "015_rate_lookup_qualification.sql", "016_inventory_procurement.sql")
+    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql", "008_hotel_onboarding_settings.sql", "009_identity_provisioning.sql", "010_guest_quota.sql", "011_private_documents.sql", "012_operational_tickets.sql", "013_content_catalog.sql", "014_rooms_rates.sql", "015_rate_lookup_qualification.sql", "016_inventory_procurement.sql", "017_dining_kitchen.sql", "018_menu_lock_qualification.sql")
 ]
 
 
@@ -991,3 +991,31 @@ def test_stock_receiving_idempotency_and_tenant_scope(pg, oidc_rig, monkeypatch)
     report=client.get(base+"/procurement",headers=owner).json()
     assert report["items"][0]["balance"]==10
     assert report["orders"][0]["state"]=="received"
+
+
+def test_dining_order_price_and_kitchen_transitions(pg, oidc_rig, monkeypatch):
+    client,key,source=oidc_rig
+    monkeypatch.setenv("WF_OPERATIONS_POSTGRES_DSN",os.environ["WF_STAFF_POSTGRES_DSN"])
+    monkeypatch.setenv("WF_PUBLIC_CONTENT_POSTGRES_DSN",os.environ["WF_GUEST_POSTGRES_DSN"])
+    owner=auth_header(signed_token(key,"idp:hotel-a-owner"))
+    other=auth_header(signed_token(key,"idp:hotel-b-reception"))
+    reception=auth_header(signed_token(key,"idp:hotel-a-reception"))
+    base="/api/v1/properties/hotel-a"
+    m=client.put(base+"/staff/menu",json={"code":"meal","name":"Meal","price_minor":2500,"currency":"NGN","available":True,"revision":0},headers=owner)
+    assert m.status_code==200,m.text
+    item=m.json()["id"]
+    route=base+"/staff/dining/orders"
+    order={"request_key":"food-test-001","lines":[{"item_id":item,"quantity":2}]}
+    r=client.post(route,json=order,headers=reception)
+    assert r.status_code==201,r.text
+    assert r.json()["total_minor"]==5000 and r.json()["payment_confirmed"] is False
+    oid=r.json()["id"]
+    assert client.post(route,json=order,headers=reception).json()["duplicate"] is True
+    transition=route+"/"+oid+"/transition"
+    assert client.post(transition,json={"action":"accept"},headers=reception).status_code==403
+    assert client.post(transition,json={"action":"accept"},headers=other).status_code==403
+    for action,state in (("accept","accepted"),("prepare","preparing"),("ready","ready"),("serve","served")):
+        r=client.post(transition,json={"action":action},headers=owner)
+        assert r.status_code==200,r.text
+        assert r.json()["state"]==state
+    assert client.get(route,headers=owner).json()["orders"][0]["state"]=="served"
