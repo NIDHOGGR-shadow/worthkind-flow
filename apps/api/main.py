@@ -514,3 +514,6 @@ install_operations_pg_routes(app)
 
 from operations_pg import install_content_pg_routes
 install_content_pg_routes(app)
+
+from operations_pg import install_room_pg_routes
+install_room_pg_routes(app)
