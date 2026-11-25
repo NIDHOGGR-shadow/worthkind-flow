@@ -6,6 +6,10 @@ from urllib.parse import urlencode
 from urllib.request import Request,build_opener
 from urllib.error import HTTPError,URLError
 from fastapi import Header,HTTPException,Query
+from pydantic import BaseModel,Field
+from uuid import UUID
+import psycopg
+from psycopg import errors
 from supabase_identity import NoRedirect
 from operations_pg import actor,command
 
@@ -112,3 +116,40 @@ def install_pms_routes(app):
                 raise HTTPException(502,"Unsupported room availability")
             result.append({"room_type_id":identifier(row.get("roomTypeID")),"rooms_available":available})
         return {"provider":"cloudbeds","room_types":result,"retrieved_at":datetime.now(timezone.utc).isoformat(),"inventory_held":False,"rates_binding":False}
+
+
+class EvidenceRequest(BaseModel):
+    reservation_id:str=Field(min_length=1,max_length=100,pattern=r"^[A-Za-z0-9_-]+$")
+    intent_id:UUID|None=None
+
+def record_evidence(subject,slug,cfg,view,intent_id):
+    dsn=os.getenv("WF_PMS_PROVIDER_POSTGRES_DSN")
+    if not dsn:
+        raise HTTPException(503,"PMS evidence database unavailable")
+    try:
+        with psycopg.connect(dsn,connect_timeout=5) as conn:
+            with conn.transaction():
+                conn.execute("SET LOCAL ROLE wf_pms_provider")
+                return conn.execute("SELECT worthkind_flow.record_pms_reservation(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                (subject,slug,cfg["property_id"],cfg["alias"],view["reservation_id"],view["state"],date.fromisoformat(view["arrival"]),date.fromisoformat(view["departure"]),view.get("source_id"),view.get("source_name"),view.get("channel_reservation_id"),intent_id)).fetchone()[0]
+    except errors.InsufficientPrivilege:
+        raise HTTPException(403,"PMS account access denied") from None
+    except (errors.CheckViolation,errors.UniqueViolation):
+        raise HTTPException(409,"PMS reservation evidence conflict") from None
+    except psycopg.Error:
+        raise HTTPException(503,"PMS evidence unavailable") from None
+
+def install_pms_evidence_routes(app):
+    base="/api/v1/properties/{slug}/staff/pms"
+    @app.post(base+"/reservation-evidence")
+    def sync(slug:str,body:EvidenceRequest,authorization:str|None=Header(None)):
+        subject=actor(authorization)
+        cfg=config(subject,slug)
+        data=get(cfg,"getReservation",{"propertyID":cfg["property_id"],"reservationID":body.reservation_id,"includeGuestRequirements":"false"})
+        view=reservation_view(cfg,data,body.reservation_id)
+        evidence=record_evidence(subject,slug,cfg,view,body.intent_id)
+        return {"evidence":evidence,"source":"cloudbeds","guest_identity_link_independently_verified":False}
+
+    @app.get(base+"/reservation-evidence")
+    def list_evidence(slug:str,authorization:str|None=Header(None)):
+        return {"reservations":command("SELECT worthkind_flow.list_pms_evidence(%s,%s)",(actor(authorization),slug))[0],"source":"last_verified_cloudbeds_readback"}
