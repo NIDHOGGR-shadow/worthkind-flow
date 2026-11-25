@@ -4,10 +4,12 @@
   const say=(id,message)=>{el(id).textContent=message;};
   const node=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=String(text);if(cls)n.className=cls;return n;};
   const ctx=staffContext();
+  let roster=null,rooms=null,range=null;
   let session,api,view="cases",cases=null,tickets=null,settings=null,pendingTicket=null,expiryTimer,authBusy=false;
   const randomKey=()=>Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,"0")).join("");
   const describe=s=>String(s).replaceAll("_"," ");
   function clearData(){
+    roster=null;rooms=null;range=null;el("staff-roster").replaceChildren();el("staff-shifts").replaceChildren();el("staff-rooms").replaceChildren();el("staff-profile-form").reset();el("shift-form").reset();el("schedule-range").reset();
     cases=null;tickets=null;settings=null;
     el("v1-cases").replaceChildren();el("v1-tickets").replaceChildren();
     el("settings-form").hidden=true;say("settings-version","");say("ai-state","");
@@ -53,6 +55,21 @@
         const b=node("button","Record response","button primary");b.type="submit";form.append(label,field,b);
         form.addEventListener("submit",e=>{e.preventDefault();if(field.value.trim().length<2)return;mutate(()=>api.caseAction(ctx.slug,c.id,"respond",field.value.trim()),loadCases,"Response recorded. External delivery is not confirmed.");});card.append(form);
       }
+      const allowed={claimed:["transfer","escalate"],responded:["transfer","escalate","resolve"],escalated:["transfer","resolve"]}[c.status]||[];
+      if(allowed.length){
+        const box=node("details"),summary=node("summary","Case controls"),label=node("label","Reason (required)"),reason=node("textarea");
+        reason.id="reason-"+c.id;label.htmlFor=reason.id;reason.minLength=8;reason.maxLength=1500;reason.rows=2;
+        box.append(summary,label,reason);
+        let target;
+        if(allowed.includes("transfer")){
+          const tl=node("label","Transfer to membership ID");target=node("input");target.id="target-"+c.id;target.maxLength=36;tl.htmlFor=target.id;box.append(tl,target);
+        }
+        const actions=node("div",undefined,"actions");
+        for(const action of allowed){
+          const b=node("button",({transfer:"Transfer",escalate:"Escalate",resolve:"Mark resolved by staff"})[action],"button secondary");b.type="button";
+          b.addEventListener("click",()=>{const why=reason.value.trim(),to=target?.value.trim();if(why.length<8||(action==="transfer"&&!WF_UUID.test(to))){say("staff-message","Enter a valid reason and transfer membership ID when required.");return;}if(!confirm("Confirm "+action+" for this case? Staff resolution is not guest confirmation."))return;mutate(()=>api.caseControl(ctx.slug,c.id,action,why,to),loadCases,"Case control recorded. No guest confirmation or notification delivery is implied.");});actions.append(b);
+        }box.append(actions);card.append(box);
+      }
       root.append(card);
     }
   }
@@ -83,7 +100,7 @@
     if(!ctx.slug){say("staff-message","Select a hotel code first.");return false;}
     const stamp=ctx.stamp();say("staff-message",loading);
     try{const task=ctx.run(op);controls();const data=await task;if(!ctx.isCurrent(stamp)||!session.signedIn)return false;apply(data);return true;}
-    catch(e){if(!ctx.isCurrent(stamp))return false;if(e.status===401){localExit("Session expired or rejected. Sign in again.");return false;}if(e.status===403){cases=null;tickets=null;settings=null;renderCases();renderTickets();el("settings-form").hidden=true;say("case-summary","Access must be verified again.");say("membership-result","");}say("staff-message",e.message);return false;}
+    catch(e){if(!ctx.isCurrent(stamp))return false;if(e.status===401){localExit("Session expired or rejected. Sign in again.");return false;}if(e.status===403){roster=null;rooms=null;renderSchedule();renderRooms();cases=null;tickets=null;settings=null;renderCases();renderTickets();el("settings-form").hidden=true;say("case-summary","Access must be verified again.");say("membership-result","");}say("staff-message",e.message);return false;}
     finally{controls();}
   }
   async function loadCases(){
@@ -92,6 +109,40 @@
   async function loadTickets(){
     tickets=null;renderTickets();return run(slug=>api.tickets(slug),data=>{tickets=data;renderTickets();say("staff-message","Department tickets loaded from server.");});
   }
+  function iso(value){const d=new Date(value);if(!Number.isFinite(d.getTime()))throw staffError("Select a valid date and time.");return d.toISOString();}
+  function dateLabel(value){const d=new Date(value);return Number.isFinite(d.getTime())?d.toLocaleString():String(value);}
+  function renderSchedule(){
+    const root=el("staff-roster"),shifts=el("staff-shifts");root.replaceChildren();shifts.replaceChildren();if(!roster)return;
+    if(!roster.members.length)root.append(node("p","No authorized staff records returned.","case-empty"));
+    for(const m of roster.members){
+      const card=node("article",undefined,"staff-record");
+      card.append(node("h3",m.display_name||"Staff member"),node("p",describe(m.role)+" · "+describe(m.state),"staff-meta"),node("p",m.job_title||"No job title recorded."),node("p","Membership: "+m.membership_id,"staff-meta"));
+      if(m.state==="active"){const b=node("button","Use for profile or shift","button secondary");b.type="button";b.addEventListener("click",()=>{el("profile-member").value=m.membership_id;el("profile-name").value=m.display_name||"";el("profile-title").value=m.job_title||"";el("profile-reference").value=m.employee_reference||"";el("shift-member").value=m.membership_id;});card.append(b);}root.append(card);
+    }
+    if(!roster.shifts.length)shifts.append(node("p","No shifts returned for this range.","case-empty"));
+    for(const shift of roster.shifts){
+      const card=node("article",undefined,"staff-record"),member=roster.members.find(m=>m.membership_id===shift.membership_id);
+      card.append(node("h3",member?.display_name||shift.membership_id),node("p",dateLabel(shift.starts_at)+" to "+dateLabel(shift.ends_at)),node("p",shift.state,"staff-meta"));
+      if(shift.state==="scheduled"){const b=node("button","Cancel shift","button secondary");b.type="button";b.addEventListener("click",()=>{if(confirm("Cancel this scheduled shift?"))mutate(()=>api.cancelShift(ctx.slug,shift.id),loadSchedule,"Shift cancellation recorded.");});card.append(b);}shifts.append(card);
+    }
+  }
+  async function loadSchedule(){if(!range){say("staff-message","Select a schedule date range first.");return false;}roster=null;renderSchedule();return run(slug=>api.schedule(slug,range.start,range.end),data=>{roster=data;renderSchedule();say("staff-message","Authorized roster and shifts loaded.");});}
+  function renderRooms(){
+    const root=el("staff-rooms");root.replaceChildren();if(!rooms)return;
+    const filtered=rooms.filter(r=>!el("room-filter").value||r.operational_state===el("room-filter").value);
+    if(!filtered.length)root.append(node("p","No matching room records.","case-empty"));
+    for(const r of filtered){
+      const card=node("article",undefined,"staff-record");card.append(node("h3",r.label),node("p",describe(r.operational_state)+" · Revision "+r.revision,"staff-meta"));
+      const label=node("label","Operational condition"),select=node("select");select.id="room-"+r.id;label.htmlFor=select.id;
+      for(const state of ["unknown","clean","dirty","inspecting","out_of_service"]){const o=node("option",describe(state));o.value=state;select.append(o);}select.value=r.operational_state;
+      const b=node("button","Update room condition","button secondary");b.type="button";b.addEventListener("click",()=>{if(select.value===r.operational_state)return;if(confirm("Update the operational condition of "+r.label+"?"))mutate(()=>api.roomState(ctx.slug,r.id,select.value,r.revision),loadRooms,"Room condition updated. Occupancy and availability are not verified.");});card.append(label,select,b);root.append(card);
+    }
+  }
+  async function loadRooms(){rooms=null;renderRooms();return run(slug=>api.rooms(slug),data=>{rooms=data;renderRooms();say("staff-message","Room conditions loaded. Occupancy is not verified.");});}
+  el("schedule-range").addEventListener("submit",e=>{e.preventDefault();if(ctx.busy)return;try{range={start:iso(el("schedule-start").value),end:iso(el("schedule-end").value)};loadSchedule();}catch(e){say("staff-message",e.message);}});
+  el("staff-profile-form").addEventListener("submit",async e=>{e.preventDefault();if(ctx.busy)return;const member=el("profile-member").value.trim(),body={display_name:el("profile-name").value.trim(),job_title:el("profile-title").value.trim(),employee_reference:el("profile-reference").value.trim()};if(!WF_UUID.test(member)||Object.values(body).some(x=>x.length<2)){say("staff-message","Enter a valid membership and profile.");return;}const ok=await mutate(()=>api.saveProfile(ctx.slug,member,body),loadSchedule,"Staff profile saved.");if(ok)el("staff-profile-form").reset();});
+  el("shift-form").addEventListener("submit",async e=>{e.preventDefault();if(ctx.busy)return;try{const member=el("shift-member").value.trim(),start=iso(el("shift-start").value),end=iso(el("shift-end").value);const ok=await mutate(()=>api.createShift(ctx.slug,member,start,end),loadSchedule,"Shift scheduled by server.");if(ok)el("shift-form").reset();}catch(e){say("staff-message",e.message);}});
+  el("load-rooms").addEventListener("click",loadRooms);el("room-filter").addEventListener("change",renderRooms);
   async function loadSettings(){
     settings=null;el("settings-form").hidden=true;return run(slug=>api.settings(slug),data=>{settings=data;renderSettings();say("staff-message","Current settings loaded.");});
   }
@@ -130,7 +181,7 @@
   async function membership(action){
     if(ctx.busy)return;const subject=el("member-subject").value.trim(),role=el("member-role").value;
     if(action==="revoke"&&!confirm("Revoke this identity's membership of "+ctx.slug+"?"))return;
-    await run(slug=>api.membership(slug,action,subject,role),d=>{say("membership-result","Membership "+d.membership_id+" · "+d.role+" · "+d.state);say("staff-message","Membership command confirmed. No account or email delivery is implied.");if(action==="revoke"){cases=null;tickets=null;settings=null;renderCases();renderTickets();el("settings-form").hidden=true;}});
+    await run(slug=>api.membership(slug,action,subject,role),d=>{say("membership-result","Membership "+d.membership_id+" · "+d.role+" · "+d.state);say("staff-message","Membership command confirmed. No account or email delivery is implied.");if(action==="revoke"){roster=null;rooms=null;renderSchedule();renderRooms();cases=null;tickets=null;settings=null;renderCases();renderTickets();el("settings-form").hidden=true;}});
   }
   el("membership-form").addEventListener("submit",e=>{e.preventDefault();membership("invite");});el("accept-membership").addEventListener("click",()=>membership("accept"));el("revoke-membership").addEventListener("click",()=>membership("revoke"));
   el("login-form").addEventListener("submit",async e=>{
