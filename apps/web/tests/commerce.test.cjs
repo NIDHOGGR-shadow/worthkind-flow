@@ -55,3 +55,21 @@ test("refund request and dual approval send only authorized API commands",async(
  assert.deepEqual(JSON.parse(calls[0][1].body),{payment_id:other,reason:"Synthetic reason"});assert.deepEqual(JSON.parse(calls[1][1].body),{action:"approve"});
  await assert.rejects(api.refundAction("hotel-a",id,"force"));assert.equal(calls.length,2);
 });
+
+test("room and menu writes require current revision and exact nonbinding rate response",async()=>{
+ const calls=[];const api=commerceApi(async(url,options)=>{calls.push([url,options]);return ok(url.endsWith("/rooms")?{id,operational_state:"unknown"}:url.endsWith("/venues")?{id}:url.endsWith("/display-rates")?{id,revision:2,rates_binding:false}:{id,revision:2});},identity);
+ await api.roomType("hotel-a",{code:"DELUXE",name:"Deluxe",description:"",max_guests:2,published:true,revision:1});
+ await api.createRoom("hotel-a",{room_type_id:id,label:"312"});
+ await api.displayRate("hotel-a",{room_type_id:id,code:"WEEKEND",currency:"NGN",amount_minor:5000000,start_date:"2026-12-01",end_date:"2026-12-03",revision:1});
+ await api.saveMenu("hotel-a",{code:"MEAL",name:"Meal",description:"",price_minor:250000,currency:"NGN",available:true,revision:1});
+ await api.createVenue("hotel-a",{name:"Hall",capacity:50});
+ assert.deepEqual(calls.map(([url,o])=>[url.split("/staff")[1],o.method]),[["/room-types","PUT"],["/rooms","POST"],["/display-rates","PUT"],["/menu","PUT"],["/venues","POST"]]);
+ await assert.rejects(api.roomType("hotel-a",{code:"DELUXE",name:"Deluxe",max_guests:2,published:true,revision:-1}));
+ assert.equal(calls.length,5);
+});
+test("channel reservation lookup is read-only and page-bound",async()=>{
+ const calls=[];const api=commerceApi(async(url,options)=>{calls.push([url,options]);return ok({provider:"cloudbeds",page:2,retrieved_at:"2026-11-25T20:00:00Z",reservations:[{reservation_id:"PMS-1",state:"checked_in",arrival:"2026-12-01",departure:"2026-12-03"}]});},identity);
+ const d=await api.channels("hotel-a","2026-12-01","2026-12-03",2);
+ assert.equal(d.reservations[0].state,"checked_in");assert.equal(calls[0][1].method,"GET");
+ await assert.rejects(api.channels("hotel-a","2026-12-01","2026-12-03",1));
+});
