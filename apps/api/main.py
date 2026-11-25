@@ -547,3 +547,6 @@ install_reception_controls(app)
 
 from native_booking_pg import install_native_booking_routes
 install_native_booking_routes(app)
+
+from loyverse_pg import install_pos_routes
+install_pos_routes(app)
