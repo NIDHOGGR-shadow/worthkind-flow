@@ -164,3 +164,52 @@ input,select,textarea{border:1px solid #cbd3dc;border-radius:7px;min-height:44px
 @media(max-width:850px){.shell{width:calc(100% - 40px)}.hero{grid-template-columns:1fr;gap:28px;padding:40px 0 30px}.columns{grid-template-columns:1fr}}
 @media(max-width:760px){.workspace-layout{grid-template-columns:minmax(0,1fr);gap:22px}}
 @media(max-width:530px){.shell{width:calc(100% - 28px)}.topbar{gap:10px;min-height:60px}.brand{font-size:16px}.hero h1{font-size:40px}.panel{padding:19px}.queue-panel{padding:0}.workspace-stat{padding:12px}.staff-page-nav{gap:12px}}
+
+/* Worthkind Flow: monochrome guest and operational system.
+   Semantic warnings remain distinct; no decorative brand color. */
+:root{--ink:#171717;--deep:#171717;--accent:#171717;--muted:#606060;--line:#e5e5e5;--bg:#fff}
+body{font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--ink);overflow-wrap:anywhere}
+.shell{width:min(1280px,calc(100% - 64px))}
+.guest-header{flex-wrap:wrap;align-items:center}
+.guest-header .brand{font-size:22px;letter-spacing:-.045em;font-weight:760}
+.guest-nav{display:flex;flex-wrap:wrap;gap:8px 24px;align-items:center}
+.guest-nav a{display:inline-flex;align-items:center;min-height:44px;color:var(--ink);font-size:14px;text-decoration:none}
+.guest-nav a:hover{text-decoration:underline;text-underline-offset:4px}
+.guest-context{display:grid;grid-template-columns:minmax(0,1fr) minmax(220px,300px);gap:24px;padding:24px 0;border-bottom:1px solid var(--line);align-items:center}
+.guest-context h2{font-size:22px;line-height:1.25;margin:5px 0}
+.guest-context p{margin:6px 0;color:var(--muted);max-width:62ch;font-size:14px}
+.guest-context p[data-state=error]{color:#80531e}
+.guest-property-control label{margin:0 0 6px}
+.guest-property-control .button{margin-top:8px;width:100%}
+.guest-hero{padding:40px 0;align-items:start;gap:clamp(24px,5vw,72px)}
+.guest-hero h1{font-size:clamp(32px,4vw,52px);line-height:1.12;margin:14px 0}
+.guest-hero p{font-size:15px;line-height:1.55}
+.guest-human{background:#f5f5f5;padding:24px;border-radius:10px;margin-top:24px}
+.guest-human h2{margin:0;font-size:21px;letter-spacing:-.025em}
+.guest-human p{margin:8px 0 18px}
+.guest-hero .hero-side{padding:0}
+.guest-hero .tag{font-size:19px;margin:0 0 14px}
+.guest-hero .service-grid button{grid-template-columns:minmax(0,1fr) 24px;gap:3px 12px;padding:12px 4px;text-align:left;min-height:68px}
+.guest-hero .service-grid button strong,.guest-hero .service-grid button span{grid-column:1}
+.guest-hero .service-grid button strong{font-size:15px;grid-row:1}
+.guest-hero .service-grid button span:not(.service-arrow){font-size:13px;grid-row:2}
+.guest-hero .service-grid button .service-arrow{grid-column:2;grid-row:1 / span 2;font-size:22px;text-align:center;color:var(--ink)}
+.guest-hero .service-grid button:hover{background:#f5f5f5}
+.guest-page .columns{margin-top:0}
+.guest-page section[id]{scroll-margin-top:16px}
+.guest-page .result:empty{display:none}
+.button{min-height:44px;white-space:normal;overflow-wrap:anywhere}
+.button.secondary,input,select,textarea{border-color:#c9c9c9}
+input,select,textarea{min-width:0;max-width:100%;font-size:16px}
+textarea{line-height:1.5}
+.button.primary,.mark{background:#171717;border-color:#171717}
+.notice,.result,.case-reply,.case-empty,.knowledge-revision,.workspace-controls{background:#f5f5f5;color:#171717}
+.notice{border-left:3px solid #80531e}
+.stage-pill,.status-pill.queued{color:#80531e;background:#faf7f0;border-color:#e5d6bd}
+.status-pill.claimed,.status-pill.responded{color:#404040;background:#f5f5f5;border-color:#d6d6d6}
+:focus-visible{outline:2px solid #171717;outline-offset:3px}
+.workspace-layout>*,.form-grid>*,.columns>*{min-width:0}
+.staff-page-nav .staff-link{display:inline-flex;min-height:44px;align-items:center}
+@media(max-width:1024px){.shell{width:calc(100% - 48px)}}
+@media(max-width:767px){.shell{width:calc(100% - 32px)}.guest-context{grid-template-columns:minmax(0,1fr);gap:12px;padding:18px 0}.guest-property-control{display:grid;grid-template-columns:minmax(0,1fr);gap:6px}.guest-property-control .button{margin-top:0}.guest-hero{grid-template-columns:minmax(0,1fr);gap:24px;padding:24px 0}.guest-hero h1{font-size:36px}.guest-human{padding:18px}.guest-nav{gap:4px 16px}.guest-nav a{font-size:13px}.guest-header .brand{font-size:20px}.guest-page .form-grid{grid-template-columns:minmax(0,1fr)}.guest-page .panel{padding:18px}.guest-page .actions .button{flex:1 1 150px}}
+@media(max-width:360px){.shell{width:calc(100% - 28px)}.guest-hero h1{font-size:32px}.guest-nav{gap:4px 12px}.guest-nav a{font-size:12px}.guest-page .panel{padding:14px}.guest-human .button{width:100%}.case-card-head{flex-wrap:wrap}.status-pill{white-space:normal}}
