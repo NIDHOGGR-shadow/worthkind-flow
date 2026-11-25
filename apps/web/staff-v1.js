@@ -9,8 +9,9 @@
   const randomKey=()=>Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,"0")).join("");
   const describe=s=>String(s).replaceAll("_"," ");
   const commerce=initStaffCommerce({session:()=>session,ctx,run,mutate});
+  const management=initStaffManagement({session:()=>session,ctx,run,mutate});
   function clearData(){
-    commerce.clear();
+    commerce.clear();management.clear();
     roster=null;rooms=null;range=null;el("staff-roster").replaceChildren();el("staff-shifts").replaceChildren();el("staff-rooms").replaceChildren();el("staff-profile-form").reset();el("shift-form").reset();el("schedule-range").reset();
     cases=null;tickets=null;settings=null;
     el("v1-cases").replaceChildren();el("v1-tickets").replaceChildren();
@@ -28,7 +29,7 @@
     el("ticket-fields").disabled=locked||!!pendingTicket;
     el("ticket-create").textContent=pendingTicket?"Retry unchanged ticket":"Create ticket";
     el("ticket-discard").hidden=!pendingTicket;
-    commerce.controls();
+    commerce.controls();management.controls();
   }
   function localExit(message){
     clearTimeout(expiryTimer);session?.clear();ctx.select("");clearData();
@@ -121,7 +122,7 @@
     if(!ctx.slug){say("staff-message","Select a hotel code first.");return false;}
     const stamp=ctx.stamp();say("staff-message",loading);
     try{const task=ctx.run(op);controls();const data=await task;if(!ctx.isCurrent(stamp)||!session.signedIn)return false;apply(data);return true;}
-    catch(e){if(!ctx.isCurrent(stamp))return false;if(e.status===401){localExit("Session expired or rejected. Sign in again.");return false;}if(e.status===403){commerce.clear();roster=null;rooms=null;renderSchedule();renderRooms();cases=null;tickets=null;settings=null;renderCases();renderTickets();el("settings-form").hidden=true;say("case-summary","Access must be verified again.");say("membership-result","");}say("staff-message",e.message);return false;}
+    catch(e){if(!ctx.isCurrent(stamp))return false;if(e.status===401){localExit("Session expired or rejected. Sign in again.");return false;}if(e.status===403){commerce.clear();management.clear();roster=null;rooms=null;renderSchedule();renderRooms();cases=null;tickets=null;settings=null;renderCases();renderTickets();el("settings-form").hidden=true;say("case-summary","Access must be verified again.");say("membership-result","");}say("staff-message",e.message);return false;}
     finally{controls();}
   }
   async function loadCases(){
@@ -181,7 +182,7 @@
     e.preventDefault();if(ctx.busy)return;
     const slug=el("staff-slug").value.trim();
     if(!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)||slug.length>100)return;
-    if((pendingTicket||commerce.pending)&&!confirm("An unconfirmed ticket or dining order may already exist. Switching property discards its local retry key. Continue?"))return;
+    if((pendingTicket||commerce.pending||management.pending)&&!confirm("An unconfirmed ticket, dining order or stock operation may already exist. Switching property discards its local retry key. Continue?"))return;
     ctx.select(slug);clearData();say("property-label","Selected: "+slug+" · Access checked by each server request.");say("staff-message","Select a module and load its authorized records.");controls();
   });
   el("load-cases").addEventListener("click",loadCases);el("case-filter").addEventListener("change",renderCases);
@@ -202,7 +203,7 @@
   async function membership(action){
     if(ctx.busy)return;const subject=el("member-subject").value.trim(),role=el("member-role").value;
     if(action==="revoke"&&!confirm("Revoke this identity's membership of "+ctx.slug+"?"))return;
-    await run(slug=>api.membership(slug,action,subject,role),d=>{say("membership-result","Membership "+d.membership_id+" · "+d.role+" · "+d.state);say("staff-message","Membership command confirmed. No account or email delivery is implied.");if(action==="revoke"){commerce.clear();roster=null;rooms=null;renderSchedule();renderRooms();cases=null;tickets=null;settings=null;renderCases();renderTickets();el("settings-form").hidden=true;}});
+    await run(slug=>api.membership(slug,action,subject,role),d=>{say("membership-result","Membership "+d.membership_id+" · "+d.role+" · "+d.state);say("staff-message","Membership command confirmed. No account or email delivery is implied.");if(action==="revoke"){commerce.clear();management.clear();roster=null;rooms=null;renderSchedule();renderRooms();cases=null;tickets=null;settings=null;renderCases();renderTickets();el("settings-form").hidden=true;}});
   }
   el("membership-form").addEventListener("submit",e=>{e.preventDefault();membership("invite");});el("accept-membership").addEventListener("click",()=>membership("accept"));el("revoke-membership").addEventListener("click",()=>membership("revoke"));
   el("login-form").addEventListener("submit",async e=>{
@@ -210,7 +211,7 @@
     try{await session.signIn(el("email").value.trim(),password);el("login-panel").hidden=true;el("staff-workspace").hidden=false;el("signout").hidden=false;showView("cases");expiryTimer=setTimeout(()=>localExit("Session expired. Sign in again."),Math.max(0,session.expiresAt-Date.now()));el("staff-slug").focus();}
     catch(e){say("login-status",e.message);}finally{authBusy=false;controls();}
   });
-  el("signout").addEventListener("click",async()=>{if(authBusy)return;if((pendingTicket||commerce.pending)&&!confirm("A ticket or dining order is unconfirmed. Signing out discards its local retry key, not the server record. Continue?"))return;authBusy=true;const task=session.signOut();localExit("Signed out of this workspace.");const revoked=await task;authBusy=false;controls();if(!revoked)say("login-status","Signed out locally. Provider session revocation could not be confirmed.");});
+  el("signout").addEventListener("click",async()=>{if(authBusy)return;if((pendingTicket||commerce.pending||management.pending)&&!confirm("A ticket, dining order or stock operation is unconfirmed. Signing out discards its local retry key, not the server record. Continue?"))return;authBusy=true;const task=session.signOut();localExit("Signed out of this workspace.");const revoked=await task;authBusy=false;controls();if(!revoked)say("login-status","Signed out locally. Provider session revocation could not be confirmed.");});
   window.addEventListener("pagehide",()=>{clearTimeout(expiryTimer);session?.clear();ctx.select("");clearData();});
   window.addEventListener("pageshow",e=>{if(e.persisted)localExit("Sign in again to access staff records.");});
   (async()=>{try{const r=await fetch(new URL("./staff-auth-config.json",location.href),{cache:"no-store",credentials:"same-origin",redirect:"error"});if(!r.ok)throw staffError("Staff identity configuration unavailable.");session=staffSession(window.fetch.bind(window),await r.json());api=staffApi(window.fetch.bind(window),session);say("login-status","Sign in with your confirmed hotel identity.");}catch{say("login-status","Staff sign-in is unavailable until an authorized identity provider is configured.");}finally{controls();}})();
