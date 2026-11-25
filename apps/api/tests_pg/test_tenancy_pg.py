@@ -24,7 +24,7 @@ import pytest
 
 MIGRATIONS = [
     Path(__file__).resolve().parents[3] / "db" / "migrations" / name
-    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql", "008_hotel_onboarding_settings.sql", "009_identity_provisioning.sql", "010_guest_quota.sql", "011_private_documents.sql", "012_operational_tickets.sql", "013_content_catalog.sql", "014_rooms_rates.sql", "015_rate_lookup_qualification.sql", "016_inventory_procurement.sql", "017_dining_kitchen.sql", "018_menu_lock_qualification.sql", "019_department_roles.sql", "020_staff_shifts.sql", "021_guest_preferences_feedback.sql", "022_reservation_intents.sql", "023_hotel_finance.sql", "024_events_recruitment.sql", "025_pms_accounts.sql", "026_reception_controls.sql", "027_payment_mode_boundaries.sql", "028_operations_read_contracts.sql")
+    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql", "008_hotel_onboarding_settings.sql", "009_identity_provisioning.sql", "010_guest_quota.sql", "011_private_documents.sql", "012_operational_tickets.sql", "013_content_catalog.sql", "014_rooms_rates.sql", "015_rate_lookup_qualification.sql", "016_inventory_procurement.sql", "017_dining_kitchen.sql", "018_menu_lock_qualification.sql", "019_department_roles.sql", "020_staff_shifts.sql", "021_guest_preferences_feedback.sql", "022_reservation_intents.sql", "023_hotel_finance.sql", "024_events_recruitment.sql", "025_pms_accounts.sql", "026_reception_controls.sql", "027_payment_mode_boundaries.sql", "028_operations_read_contracts.sql", "029_native_booking_inventory.sql", "030_native_booking_changes.sql")
 ]
 
 
@@ -1125,3 +1125,40 @@ def test_department_publication_and_event_conflict_disposable(pg, oidc_rig, monk
     assert client.post(base+"/staff/vacancies/"+v.json()["id"]+"/decision",json={"action":"publish"},headers=owner).status_code==200
     assert len(client.get(base+"/vacancies").json()["vacancies"])==1
     assert client.get(base+"/staff/applications",headers=reception).status_code==403
+
+
+def test_native_hold_confirm_and_atomic_change(pg, oidc_rig, monkeypatch):
+    from datetime import date,timedelta
+    client,key,source=oidc_rig
+    monkeypatch.setenv("WF_OPERATIONS_POSTGRES_DSN",os.environ["WF_STAFF_POSTGRES_DSN"])
+    monkeypatch.setenv("WF_PUBLIC_CONTENT_POSTGRES_DSN",os.environ["WF_GUEST_POSTGRES_DSN"])
+    owner=auth_header(signed_token(key,"idp:hotel-a-owner"))
+    base="/api/v1/properties/hotel-a"
+    typ=client.put(base+"/staff/room-types",json={"code":"native","name":"Native room","max_guests":2,"published":True,"revision":0},headers=owner).json()["id"]
+    room=client.post(base+"/staff/rooms",json={"room_type_id":typ,"label":"native-101"},headers=owner).json()["id"]
+    assert client.put(base+"/staff/rooms/"+room+"/state",json={"state":"clean","revision":1},headers=owner).status_code==200
+    pg.execute("SELECT worthkind_flow.configure_native_bookings(%s,%s,%s)",("hotel-a","disposable inventory proof",True))
+    start=date.today()+timedelta(days=10)
+    policy="Disposable pay at property terms"
+    rate=client.put(base+"/staff/bookable-rates",json={"room_type_id":typ,"code":"flex","currency":"NGN","nightly_total_minor":2500000,"start_date":start.isoformat(),"end_date":(start+timedelta(days=30)).isoformat(),"policy_reference":policy,"revision":0},headers=owner)
+    assert rate.status_code==200,rate.text
+    rate=rate.json()["id"]
+    token="n"*43
+    case=client.post(base+"/enquiries",json={"request_key":"native-case-test","kind":"booking","name":"Test Guest","contact":"test@example.invalid","details":"Native room request","receipt_token":token}).json()["case_id"]
+    guest=base+"/guest/cases/"+case
+    headers={"x-receipt-token":token}
+    intent=client.post(guest+"/reservation-intents",json={"request_key":"native-stay-test","room_type_id":typ,"arrival":start.isoformat(),"departure":(start+timedelta(days=2)).isoformat(),"adults":2},headers=headers).json()["id"]
+    assert client.post(base+"/staff/reservation-intents/"+intent+"/review",json={"action":"review"},headers=owner).status_code==200
+    hold=client.post(base+"/staff/native-bookings/holds",json={"intent_id":intent,"room_type_id":typ,"rate_id":rate,"request_key":"native-hold-test"},headers=owner)
+    assert hold.status_code==201,hold.text
+    booking=hold.json()["id"]
+    assert hold.json()["total_minor"]==5000000
+    route=guest+"/native-bookings/"+booking
+    assert client.post(route+"/confirm",json={"expected_total_minor":5000000,"payment_method":"pay_at_property","accept_terms":True},headers={"x-receipt-token":"x"*43}).status_code==404
+    result=client.post(route+"/confirm",json={"expected_total_minor":5000000,"payment_method":"pay_at_property","accept_terms":True},headers=headers)
+    assert result.status_code==200,result.text
+    change={"revision":2,"arrival":(start+timedelta(days=2)).isoformat(),"departure":(start+timedelta(days=5)).isoformat(),"rate_id":rate,"expected_total_minor":7500000,"expected_currency":"NGN","policy_reference":policy,"accept_terms":True}
+    result=client.post(route+"/change-dates",json=change,headers=headers)
+    assert result.status_code==200,result.text
+    assert result.json()["booking"]["total_minor"]==7500000
+    assert client.post(base+"/staff/native-bookings/"+booking+"/cancel",json={"revision":3,"reason":"Disposable cancellation"},headers=owner).status_code==200
