@@ -221,3 +221,30 @@ def install_pms_write_routes(app):
             raise HTTPException(502,"Unknown rate job state")
         state={"completed":"verified","error":"error","in_progress":"accepted"}[status]
         return {"command":finish(subject,slug,job,state,provider_job=provider_id,result={"provider_job_status":status}),"ota_delivery_verified":False}
+
+
+    @app.post(base+"/commands/{command_id}/reconcile")
+    def reconcile_command(slug:str,command_id:UUID,body:Creation|Mutation,authorization:str|None=Header(None)):
+        subject=actor(authorization)
+        cfg=config(subject,slug)
+        job=command("SELECT worthkind_flow.get_pms_command(%s,%s,%s)",(subject,slug,command_id))[0]
+        if job["account_alias"]!=cfg["alias"] or job["external_property_id"]!=cfg["property_id"]:
+            raise HTTPException(409,"PMS account mismatch")
+        operation="create" if isinstance(body,Creation) else body.action
+        if job["operation"]!=operation or job["request_key"]!=body.request_key:
+            raise HTTPException(409,"Command mismatch")
+        if job["state"] in ("verified","error"):
+            return {"command":job}
+        rid=job["external_reservation_id"]
+        if not rid:
+            raise HTTPException(409,"Provider reservation ID unknown; investigate with hotel before retrying")
+        # The original command's fingerprint is compared in SQL. No external write is retried.
+        if not command("SELECT worthkind_flow.check_pms_command_payload(%s,%s,%s,%s)",(subject,slug,command_id,digest(body)))[0]:
+            raise HTTPException(409,"Original command payload required")
+        view=readback(cfg,rid)
+        if operation=="cancel" and view["state"]!="canceled":
+            raise HTTPException(409,"Cancellation not verified")
+        if operation=="change_checkout" and (body.checkout_date is None or view["departure"]!=body.checkout_date.isoformat()):
+            raise HTTPException(409,"Checkout change not verified")
+        evidence=record_evidence(subject,slug,cfg,view,body.intent_id if operation=="create" else None)
+        return {"command":finish(subject,slug,job,"verified",rid,result={"provider_state":view["state"],"evidence_id":evidence["id"]}),"reservation":view}
