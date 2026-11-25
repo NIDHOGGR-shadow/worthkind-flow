@@ -517,3 +517,6 @@ install_content_pg_routes(app)
 
 from operations_pg import install_room_pg_routes
 install_room_pg_routes(app)
+
+from procurement_pg import install_procurement_routes
+install_procurement_routes(app)
