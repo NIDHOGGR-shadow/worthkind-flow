@@ -6,7 +6,7 @@ const {staffConfig}=require("../web/staff-v1-core.js");
 const WEB=path.resolve(__dirname,"../web");
 const ASSETS=new Map([
  ["/","guest-v1.html"],["/staff","staff-v1.html"],
- ...["guest-v1.html","staff-v1.html","styles.css","guest-v1-core.js","guest-v1.js","staff-v1-core.js","staff-v1.js","commerce-core.js","guest-commerce.js","staff-commerce.js"].map(f=>["/static/"+f,f])
+ ...["guest-v1.html","staff-v1.html","styles.css","guest-v1-core.js","guest-v1.js","staff-v1-core.js","staff-v1.js","commerce-core.js","guest-commerce.js","staff-commerce.js","management-core.js","staff-management.js","guest-management.js"].map(f=>["/static/"+f,f])
 ]);
 const LIMIT=2_000_000, RESPONSE_LIMIT=8_000_000;
 const UUID="[0-9a-fA-F-]{36}";
@@ -23,7 +23,12 @@ const allowed=[
  ["GET","/staff/pms/availability"],["GET","/staff/pms/channel-reservations"],["PUT","/staff/room-types"],["POST","/staff/rooms"],["PUT","/staff/display-rates"],["PUT","/staff/menu"],["POST","/staff/venues"],["GET","/staff/pms/reservations/[A-Za-z0-9_-]{1,100}"],
  ["GET","/staff/dining/orders"],["POST","/staff/dining/orders"],["POST","/staff/dining/orders/"+UUID+"/transition"],
  ["GET","/staff/venue-requests"],["POST","/staff/venue-requests/"+UUID+"/decision"],
- ["GET","/staff/finance"],["POST","/staff/finance/invoices"],["POST","/staff/finance/invoices/"+UUID+"/checkout"],["POST","/staff/finance/payments/"+UUID+"/verify"],["POST","/staff/finance/refunds"],["POST","/staff/finance/refunds/"+UUID+"/(?:decision|submit|verify)"]
+ ["GET","/staff/finance"],["POST","/staff/finance/invoices"],["POST","/staff/finance/invoices/"+UUID+"/checkout"],["POST","/staff/finance/payments/"+UUID+"/verify"],["POST","/staff/finance/refunds"],["POST","/staff/finance/refunds/"+UUID+"/(?:decision|submit|verify)"],
+ ["GET","/staff/content"],["POST","/staff/content"],["POST","/staff/content/"+UUID+"/decision"],
+ ["GET","/staff/procurement"],["POST","/staff/stock/items"],["POST","/staff/suppliers"],["PUT","/staff/suppliers/"+UUID+"/state"],["POST","/staff/purchase-orders"],["POST","/staff/purchase-orders/"+UUID+"/decision"],["POST","/staff/stock/movements"],
+ ["GET","/vacancies"],["POST","/staff/vacancies"],["POST","/staff/vacancies/"+UUID+"/decision"],["GET","/staff/applications"],["POST","/staff/applications/"+UUID+"/decision"],
+ ["GET","/guest/cases/"+UUID+"/preferences"],["PUT","/guest/cases/"+UUID+"/preferences"],["POST","/guest/cases/"+UUID+"/feedback"],["POST","/guest/cases/"+UUID+"/applications"],
+ ["GET","/staff/feedback"],["POST","/staff/feedback/"+UUID+"/review"]
 ].map(([method,suffix])=>[method,new RegExp("^/api/v1/properties/[a-z0-9]+(?:-[a-z0-9]+)*"+suffix+"$")]);
 function config(env){
  const upstream=new URL(env.WF_FRONTEND_API_ORIGIN||"");
