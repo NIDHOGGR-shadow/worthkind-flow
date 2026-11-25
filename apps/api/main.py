@@ -497,3 +497,6 @@ def postgres_staff_reply_v1(
 
 from staff_lifecycle import install_staff_lifecycle_routes
 install_staff_lifecycle_routes(app)
+
+from property_config import install_property_config_routes
+install_property_config_routes(app)
