@@ -54,6 +54,10 @@ def check_staff_v1(browser, base):
         request = route.request
         path = urlsplit(request.url).path
         calls.append((request.method, path))
+        if path == "/api/v1/properties/hotel-a/vacancies":
+            assert request.headers.get("authorization") is None
+            route.fulfill(json={"vacancies":[{"id":MEMBER_ID,"title":"Synthetic vacancy","description":"Published fixture vacancy","deadline":"2026-12-01"}]})
+            return
         if path == "/api/v1/properties/hotel-a/menu":
             assert request.headers.get("authorization") is None
             route.fulfill(json={"items":[{"id":TICKET_ID,"name":"Synthetic meal","price_minor":250000,"currency":"NGN"}]})
@@ -63,7 +67,38 @@ def check_staff_v1(browser, base):
             route.fulfill(status=403, json={"detail": "Access denied"})
             return
         prefix = "/api/v1/properties/hotel-a/staff"
-        if path == prefix + "/reservation-intents":
+        if path == "/api/v1/properties/hotel-a/vacancies":
+            route.fulfill(json={"vacancies":[{"id":MEMBER_ID,"title":"Synthetic vacancy","description":"Published fixture vacancy","deadline":"2026-12-01"}]})
+        elif path == prefix + "/content":
+            if request.method == "POST":
+                state["content"]="draft"
+                route.fulfill(json={"id":CASE_ID,"state":"draft"})
+            else:
+                route.fulfill(json={"content":[{"id":CASE_ID,"key":"hotel-information","version":1,"content":{"title":"Synthetic hotel content","body":"Approved fixture body"},"source_reference":"Fixture source","state":state.get("content","draft")}]})
+        elif path == prefix + "/content/" + CASE_ID + "/decision":
+            assert request.post_data_json == {"action":"publish"}
+            state["content"]="published"
+            route.fulfill(json={"id":CASE_ID,"state":"published"})
+        elif path == prefix + "/procurement":
+            route.fulfill(json={"items":[{"id":TICKET_ID,"sku":"TEST","name":"Synthetic stock","unit":"kg","balance":state.get("balance","2.000"),"reorder_level":"3.000","active":True}],"suppliers":[{"id":MEMBER_ID,"name":"Synthetic supplier","external_reference":"fixture","state":"approved"}],"orders":[]})
+        elif path == prefix + "/stock/movements":
+            assert request.post_data_json["quantity_delta"] == "-1.000"
+            assert request.post_data_json["item_id"] == TICKET_ID
+            state["balance"]="1.000"
+            route.fulfill(json={"id":CASE_ID,"balance":"1.000","duplicate":False})
+        elif path == prefix + "/applications":
+            route.fulfill(json={"applications":[{"id":CASE_ID,"vacancy_id":MEMBER_ID,"case_id":CASE_ID,"state":state.get("application","submitted"),"statement":"Synthetic statement","qualifications":"Fixture qualifications"}]})
+        elif path == prefix + "/applications/" + CASE_ID + "/decision":
+            assert request.post_data_json == {"action":"review"}
+            state["application"]="reviewing"
+            route.fulfill(json={"id":CASE_ID,"state":"reviewing"})
+        elif path == prefix + "/feedback":
+            route.fulfill(json={"feedback":[{"id":CASE_ID,"case_id":CASE_ID,"rating":4,"state":state.get("feedback","new"),"comment":"Synthetic feedback"}]})
+        elif path == prefix + "/feedback/" + CASE_ID + "/review":
+            assert request.post_data_json == {"action":"review"}
+            state["feedback"]="reviewed"
+            route.fulfill(json={"id":CASE_ID,"state":"reviewed"})
+        elif path == prefix + "/reservation-intents":
             route.fulfill(json={"intents":[{"id":CASE_ID,"case_id":CASE_ID,"state":state.get("stay","requested"),"arrival":"2026-12-01","departure":"2026-12-03","adults":2,"children":0,"room_count":1}]})
         elif path == prefix + "/reservation-intents/" + CASE_ID + "/review":
             assert request.post_data_json["action"] == "review"
@@ -246,7 +281,36 @@ def check_staff_v1(browser, base):
     page.get_by_role("button", name="Verify provider payment").click()
     expect(page.locator("#finance-payments")).to_contain_text("verified")
     expect(page.locator("#finance-payments")).to_contain_text("Mode: test")
-    for label in ("Reception", "Department work", "Memberships", "Staff schedule", "Room readiness", "Hotel settings","Reservations","Catalog","Dining","Events","Finance"):
+    page.get_by_role("button", name="Website content", exact=True).click()
+    page.locator("#load-content-versions").click()
+    expect(page.locator("#content-records")).to_contain_text("Synthetic hotel content")
+    page.locator("#content-records").get_by_role("button", name="publish", exact=True).click()
+    expect(page.locator("#content-records")).to_contain_text("published")
+    page.get_by_role("button", name="Procurement", exact=True).click()
+    page.locator("#load-procurement").click()
+    expect(page.locator("#procurement-records")).to_contain_text("At or below reorder level")
+    page.locator("#procurement-forms summary").filter(has_text="Record stock movement").click()
+    movement = page.locator("#procurement-forms details").filter(has_text="Record stock movement")
+    movement.get_by_label("Stock item ID", exact=True).fill(TICKET_ID)
+    movement.get_by_label("Quantity change (negative for consumption)").fill("-1.000")
+    movement.get_by_label("Reason", exact=True).fill("Synthetic consumption")
+    movement.get_by_role("button", name="Record stock movement", exact=True).click()
+    expect(page.locator("#procurement-records")).to_contain_text("Balance: 1.000")
+    page.get_by_role("button", name="Careers", exact=True).click()
+    page.locator("#load-vacancies").click()
+    expect(page.locator("#vacancy-records")).to_contain_text("Synthetic vacancy")
+    page.locator("#load-applications").click()
+    expect(page.locator("#application-records")).to_contain_text("Synthetic statement")
+    page.locator("#application-records").get_by_role("button", name="review", exact=True).click()
+    expect(page.locator("#application-records")).to_contain_text("reviewing")
+    page.get_by_role("button", name="Guest feedback", exact=True).click()
+    page.locator("#load-feedback").click()
+    page.locator("#feedback-records").get_by_role("button", name="review", exact=True).click()
+    expect(page.locator("#feedback-records")).to_contain_text("reviewed")
+    page.get_by_role("button", name="Management", exact=True).click()
+    page.locator("#management-refresh").click()
+    expect(page.locator("#management-summary")).to_contain_text("Items at/below reorder level")
+    for label in ("Reception", "Department work", "Memberships", "Staff schedule", "Room readiness", "Hotel settings","Reservations","Catalog","Dining","Events","Finance","Management","Website content","Procurement","Careers","Guest feedback"):
         page.get_by_role("button", name=label, exact=True).click()
         for width in WIDTHS:
             page.set_viewport_size({"width": width, "height": 900})
@@ -265,6 +329,9 @@ def check_staff_v1(browser, base):
     expect(page.locator("#finance-payments")).to_be_empty()
     expect(page.locator("#dining-queue")).to_be_empty()
     expect(page.locator("#reservation-queue")).to_be_empty()
+    expect(page.locator("#application-records")).to_be_empty()
+    expect(page.locator("#management-summary")).to_be_empty()
+    expect(page.locator("#procurement-records")).to_be_empty()
     page.get_by_role("button", name="Reception", exact=True).click()
     page.locator("#load-cases").click()
     expect(page.locator("#staff-message")).to_contain_text("not authorized")
@@ -274,4 +341,4 @@ def check_staff_v1(browser, base):
     expect(page.locator("#staff-workspace")).to_be_hidden()
     assert all(path.startswith("/api/v1/") for _, path in calls)
     page.close()
-    print("PASS: staff v1 Chromium fixture journey and 66 authenticated-layout checks")
+    print("PASS: staff v1 Chromium fixture journey and 96 authenticated-layout checks")
