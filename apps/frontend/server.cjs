@@ -6,11 +6,12 @@ const {staffConfig}=require("../web/staff-v1-core.js");
 const WEB=path.resolve(__dirname,"../web");
 const ASSETS=new Map([
  ["/","guest-v1.html"],["/staff","staff-v1.html"],
- ...["guest-v1.html","staff-v1.html","styles.css","guest-v1-core.js","guest-v1.js","staff-v1-core.js","staff-v1.js","commerce-core.js","guest-commerce.js","staff-commerce.js","management-core.js","staff-management.js","guest-management.js","native-booking-core.js","native-booking-guest.js","native-booking-staff.js","provider-evidence-core.js","provider-evidence-ui.js"].map(f=>["/static/"+f,f])
+ ...["guest-v1.html","staff-v1.html","styles.css","guest-v1-core.js","guest-v1.js","staff-v1-core.js","staff-v1.js","commerce-core.js","guest-commerce.js","staff-commerce.js","management-core.js","staff-management.js","guest-management.js","native-booking-core.js","native-booking-guest.js","native-booking-staff.js","provider-evidence-core.js","provider-evidence-ui.js","private-documents.js","ai-studio-core.js","ai-studio-ui.js","guest-ai.js"].map(f=>["/static/"+f,f])
 ]);
 const LIMIT=2_000_000, RESPONSE_LIMIT=8_000_000;
 const UUID="[0-9a-fA-F-]{36}";
 const allowed=[
+ ["POST","/staff/documents"],["GET","/staff/documents/"+UUID],["GET","/staff/ai/policy"],["PUT","/staff/ai/policy"],["PUT","/staff/ai/sources/"+UUID],["POST","/staff/ai/chat"],["POST","/ai/chat"],
  ["GET","/enquiries/"+UUID],["POST","/enquiries"],
  ["GET","/staff/cases"],["POST","/staff/cases/"+UUID+"/(?:claim|respond|control)"],
  ["GET","/staff/tickets"],["POST","/staff/tickets"],["GET","/staff/tickets/"+UUID],["POST","/staff/tickets/"+UUID+"/transition"],
@@ -39,7 +40,7 @@ function config(env){
    identity={enabled:true,provider:"supabase",url:env.WF_SUPABASE_URL,publishableKey:env.WF_SUPABASE_PUBLISHABLE_KEY};
    staffConfig(identity);
  }
- return {upstream:upstream.origin,identity};
+ return {upstream:upstream.origin,identity,documentsEnabled:env.WF_FRONTEND_DOCUMENTS_ENABLED==="1"};
 }
 function headers(identity){
  return {"Cache-Control":"no-store","X-Content-Type-Options":"nosniff","Referrer-Policy":"no-referrer","X-Frame-Options":"DENY",
@@ -53,7 +54,7 @@ async function boundedBody(stream,max){
  for await(const part of stream){const b=Buffer.from(part);total+=b.length;if(total>max)throw Error("Size limit exceeded");parts.push(b);}
  return Buffer.concat(parts,total);
 }
-function handler({upstream,identity},fetcher=fetch){
+function handler({upstream,identity,documentsEnabled=false},fetcher=fetch){
  const base=headers(identity);
  return async(req,res)=>{
    const raw=req.url||"";
@@ -69,16 +70,23 @@ function handler({upstream,identity},fetcher=fetch){
      if(file){try{const body=await readFile(path.join(WEB,file));const type=file.endsWith(".html")?"text/html":file.endsWith(".css")?"text/css":"text/javascript";res.writeHead(200,{...base,"Content-Type":type+"; charset=utf-8","Content-Length":body.length});res.end(method==="HEAD"?undefined:body);}catch{json(res,503,{detail:"Frontend asset unavailable"},base);}return;}
    }
    if(!allowed.some(([m,re])=>m===method&&re.test(url.pathname))){json(res,404,{detail:"Not found"},base);return;}
+   const upload=method==="POST"&&/\/staff\/documents$/.test(url.pathname);
+   const download=method==="GET"&&new RegExp("/staff/documents/"+UUID+"$").test(url.pathname);
+   if((upload||download)&&(!documentsEnabled||!/^Bearer [^\s]+$/.test(req.headers.authorization||""))){json(res,documentsEnabled?401:503,{detail:documentsEnabled?"Staff authentication required":"Private documents not enabled"},base);return;}
+   if((upload||download)&&url.search){json(res,400,{detail:"Unexpected query"},base);return;}
    // No cookie forwarding, arbitrary destination, legacy API, or client-controlled upstream headers.
    const h={Accept:"application/json"};
    for(const k of ["authorization","x-receipt-token","content-type"]){if(typeof req.headers[k]==="string")h[k]=req.headers[k];}
-   if(method!=="GET"&&h["content-type"]&&!/^application\/json(?:;|$)/i.test(h["content-type"])){json(res,415,{detail:"JSON required"},base);return;}
+   if(upload&&h["content-type"]!=="application/octet-stream"){json(res,415,{detail:"Binary upload required"},base);return;}
+   if(download)h.Accept="application/octet-stream";
+   if(!upload&&method!=="GET"&&h["content-type"]&&!/^application\/json(?:;|$)/i.test(h["content-type"])){json(res,415,{detail:"JSON required"},base);return;}
    if(Number(req.headers["content-length"]||0)>LIMIT){json(res,413,{detail:"Request too large"},base);return;}
    let body;try{if(method!=="GET")body=await boundedBody(req,LIMIT);}catch{if(!res.destroyed)json(res,413,{detail:"Request too large"},base);return;}
    try{
      const response=await fetcher(upstream+url.pathname+url.search,{method,headers:h,...(body?.length?{body}:{}),redirect:"manual",signal:AbortSignal.timeout(20000)});
      if(response.status>=300&&response.status<400){await response.body?.cancel();json(res,502,{detail:"Unexpected upstream redirect"},base);return;}
-     const data=await boundedBody(response.body,RESPONSE_LIMIT);
+     const data=await boundedBody(response.body,download?LIMIT:RESPONSE_LIMIT);
+     if(download&&response.ok){if(response.status!==200||response.headers.get("content-type")!=="application/octet-stream"||!/^attachment(?:;|$)/i.test(response.headers.get("content-disposition")||"")||!data.length){json(res,502,{detail:"Unexpected document response"},base);return;}res.writeHead(200,{...base,"Content-Type":"application/octet-stream","Content-Disposition":"attachment; filename=\"private-document.bin\"","Content-Length":data.length});res.end(data);return;}
      if(!/application\/json/i.test(response.headers.get("content-type")||"")){json(res,502,{detail:"Unexpected upstream response"},base);return;}
      // Only JSON is served from upstream on this origin; strip all upstream cookies/redirects.
      JSON.parse(data.toString("utf8"));res.writeHead(response.status,{...base,"Content-Type":"application/json; charset=utf-8"});res.end(data);
