@@ -97,3 +97,12 @@ test("Q2 reception control includes reason and explicit transfer target",async()
  await assert.rejects(api.caseControl("hotel-a",id,"resolve","short"));
  assert.equal(calls.length,3);
 });
+
+test("ticket history is identity-bound and never accepts another record's response",async()=>{
+ const calls=[];const history=[{actor:id,action:"note",note:"Synthetic history",created_at:"2026-11-25T10:00:00Z"}];
+ const api=staffApi(async(url,options)=>{calls.push({url,options});return ok({id,status:"open",history})},identity);
+ assert.deepEqual((await api.ticketDetail("hotel-a",id)).history,history);
+ assert.equal(calls[0].url,"/api/v1/properties/hotel-a/staff/tickets/"+id);
+ await assert.rejects(staffApi(async()=>ok({id:"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",status:"open",history}),identity).ticketDetail("hotel-a",id));
+ await assert.rejects(staffApi(async()=>ok({id,status:"open",history:[{action:"note",note:{},created_at:"2026-11-25"}]}),identity).ticketDetail("hotel-a",id));
+});
