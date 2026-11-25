@@ -24,7 +24,7 @@ import pytest
 
 MIGRATIONS = [
     Path(__file__).resolve().parents[3] / "db" / "migrations" / name
-    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql", "008_hotel_onboarding_settings.sql", "009_identity_provisioning.sql", "010_guest_quota.sql", "011_private_documents.sql", "012_operational_tickets.sql", "013_content_catalog.sql", "014_rooms_rates.sql", "015_rate_lookup_qualification.sql", "016_inventory_procurement.sql", "017_dining_kitchen.sql", "018_menu_lock_qualification.sql")
+    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql", "008_hotel_onboarding_settings.sql", "009_identity_provisioning.sql", "010_guest_quota.sql", "011_private_documents.sql", "012_operational_tickets.sql", "013_content_catalog.sql", "014_rooms_rates.sql", "015_rate_lookup_qualification.sql", "016_inventory_procurement.sql", "017_dining_kitchen.sql", "018_menu_lock_qualification.sql", "019_department_roles.sql", "020_staff_shifts.sql")
 ]
 
 
@@ -1019,3 +1019,25 @@ def test_dining_order_price_and_kitchen_transitions(pg, oidc_rig, monkeypatch):
         assert r.status_code==200,r.text
         assert r.json()["state"]==state
     assert client.get(route,headers=owner).json()["orders"][0]["state"]=="served"
+
+
+def test_staff_schedule_permissions_and_overlap(pg, oidc_rig, monkeypatch):
+    client,key,source=oidc_rig
+    monkeypatch.setenv("WF_OPERATIONS_POSTGRES_DSN",os.environ["WF_STAFF_POSTGRES_DSN"])
+    owner=auth_header(signed_token(key,"idp:hotel-a-owner"))
+    reception=auth_header(signed_token(key,"idp:hotel-a-reception"))
+    other=auth_header(signed_token(key,"idp:hotel-b-reception"))
+    base="/api/v1/properties/hotel-a/staff"
+    member=str(pg.execute("SELECT m.id FROM worthkind_flow.staff_memberships m JOIN worthkind_flow.staff_identities i ON i.id=m.identity_id WHERE i.provider_subject='idp:hotel-a-reception'").fetchone()[0])
+    assert client.put(base+"/profiles/"+member,json={"display_name":"Staff Member","job_title":"Reception","employee_reference":"staff-001"},headers=owner).status_code==200
+    body={"membership_id":member,"starts_at":"2026-12-01T08:00:00+01:00","ends_at":"2026-12-01T16:00:00+01:00"}
+    r=client.post(base+"/shifts",json=body,headers=owner)
+    assert r.status_code==201,r.text
+    sid=r.json()["id"]
+    assert client.post(base+"/shifts",json=body,headers=owner).status_code==409
+    query={"start":"2026-12-01T00:00:00+01:00","end":"2026-12-02T00:00:00+01:00"}
+    assert client.get(base+"/schedule",params=query,headers=other).status_code==403
+    report=client.get(base+"/schedule",params=query,headers=reception).json()
+    assert len(report["members"])==1 and len(report["shifts"])==1
+    assert client.post(base+"/shifts/"+sid+"/cancel",headers=reception).status_code==403
+    assert client.post(base+"/shifts/"+sid+"/cancel",headers=owner).status_code==200
