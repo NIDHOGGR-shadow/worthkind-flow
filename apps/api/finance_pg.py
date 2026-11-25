@@ -7,14 +7,21 @@ from uuid import UUID
 from decimal import Decimal
 import psycopg
 from psycopg import errors
-from fastapi import Header,HTTPException,Request
+from fastapi import Header,HTTPException,Request,Query
 from pydantic import BaseModel,Field
+from psycopg.types.json import Jsonb
 from starlette.concurrency import run_in_threadpool
 from operations_pg import actor,command
-from paystack_provider import account,initialize,verify,create_refund,fetch_refund,webhook_valid,ProviderUnavailable
+from paystack_provider import account,initialize,verify,create_refund,fetch_refund,webhook_valid,ProviderUnavailable,settlements,settlement_transactions
 
 class Invoice(BaseModel):
     dining_order_id:UUID
+
+class StayInvoice(BaseModel):
+    native_booking_id:UUID
+
+class VoidInvoice(BaseModel):
+    reason:str=Field(min_length=8,max_length=240)
 
 class Checkout(BaseModel):
     email:str=Field(min_length=5,max_length=254,pattern=r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
@@ -191,3 +198,59 @@ def install_finance_routes(app):
             return {"accepted":True,"handled":False}
         state=await run_in_threadpool(verify_and_record,slug,ref,cfg)
         return {"accepted":True,"state":state}
+
+
+    @app.post(base+"/stay-invoices",status_code=201)
+    def stay_invoice(slug:str,body:StayInvoice,authorization:str|None=Header(None)):
+        r=command("SELECT worthkind_flow.issue_native_stay_invoice(%s,%s,%s)",(actor(authorization),slug,body.native_booking_id))
+        return {"id":str(r[0]),"source":"native_booking"}
+
+    @app.post(base+"/invoices/{invoice_id}/void")
+    def void(slug:str,invoice_id:UUID,body:VoidInvoice,authorization:str|None=Header(None)):
+        r=command("SELECT worthkind_flow.void_unpaid_invoice(%s,%s,%s,%s)",(actor(authorization),slug,invoice_id,body.reason))
+        return {"id":str(invoice_id),"state":r[0]}
+
+    @app.get(base+"/settlements")
+    def list_settlements(slug:str,page:int=Query(1,ge=1,le=10000),authorization:str|None=Header(None)):
+        subject=actor(authorization)
+        info=command("SELECT * FROM worthkind_flow.staff_payment_account(%s,%s)",(subject,slug))
+        cfg=configured(slug,info[0],info[1])
+        try:
+            result=settlements(cfg,page)
+        except ProviderUnavailable:
+            raise HTTPException(503,"Settlement list unavailable") from None
+        rows=[]
+        for r in result["data"]:
+            if not isinstance(r,dict) or r.get("domain")!=cfg["mode"] or type(r.get("id")) is not int or not 0<r["id"]<2**64:
+                raise HTTPException(502,"Unsupported settlement response")
+            if r.get("status") not in ("success","pending","processing","failed") or not isinstance(r.get("currency"),str):
+                raise HTTPException(502,"Unsupported settlement status")
+            amounts=("total_amount","effective_amount","total_fees","total_processed")
+            if any(type(r.get(k)) is not int for k in amounts):
+                raise HTTPException(502,"Unsupported settlement amounts")
+            rows.append({"id":r["id"],"mode":r["domain"],"status":r["status"],"currency":r["currency"],
+                        "settlement_date":r.get("settlement_date"),**{k:r[k] for k in amounts}})
+        meta=result.get("meta") if isinstance(result.get("meta"),dict) else {}
+        return {"settlements":rows,"page":page,"page_count":meta.get("pageCount"),"source":"paystack","bank_deposit_independently_verified":False}
+
+    @app.get(base+"/settlements/{settlement_id}/transactions")
+    def settlement_page(slug:str,settlement_id:int,page:int=Query(1,ge=1,le=10000),authorization:str|None=Header(None)):
+        if not 0<settlement_id<2**64:
+            raise HTTPException(422,"Invalid settlement identifier")
+        subject=actor(authorization)
+        info=command("SELECT * FROM worthkind_flow.staff_payment_account(%s,%s)",(subject,slug))
+        cfg=configured(slug,info[0],info[1])
+        try:
+            result=settlement_transactions(cfg,settlement_id,page)
+        except ProviderUnavailable:
+            raise HTTPException(503,"Settlement transactions unavailable") from None
+        rows=[]
+        if len(result["data"])>50:
+            raise HTTPException(502,"Unsupported settlement page")
+        for r in result["data"]:
+            if not isinstance(r,dict) or r.get("domain")!=cfg["mode"] or type(r.get("id")) is not int or not 0<r["id"]<2**64 or type(r.get("amount")) is not int or not isinstance(r.get("reference"),str) or not isinstance(r.get("currency"),str) or not isinstance(r.get("status"),str):
+                raise HTTPException(502,"Unsupported settlement transaction")
+            rows.append({"reference":r["reference"],"transaction_id":r["id"],"amount_minor":r["amount"],"currency":r["currency"],"status":r["status"]})
+        compared=command("SELECT worthkind_flow.compare_settlement_page(%s,%s,%s,%s,%s)",(subject,slug,cfg["alias"],cfg["mode"],Jsonb(rows)))[0]
+        meta=result.get("meta") if isinstance(result.get("meta"),dict) else {}
+        return {"settlement_id":settlement_id,"page":page,"page_count":meta.get("pageCount"),"transactions":compared,"mode":cfg["mode"],"bank_deposit_independently_verified":False}
