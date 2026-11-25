@@ -11,29 +11,33 @@ This register separates source implementation from browser and hosted integratio
 - [x] Private receipt reveal, recovery, loading, error and retry controls; no persistent browser storage.
 - [x] Seven versioned guest contract regression cases executed successfully against the fetched committed core and test sources in a JS harness (test doubles, not live HTTP).
 - [x] Add Chromium regression coverage for versioned failure isolation and six widths across six routes.
-- [ ] Execute the full Chromium suite and inspect actual rendered layouts. Previous run 12 passed JavaScript tests but failed Playwright installation on Ubuntu 26.04; runner now pinned to Ubuntu 24.04.
+- [x] Chromium suite passed on Ubuntu 24.04, GitHub Actions run 45694066700. Automated geometry checks are not full visual inspection.
 - [ ] Verify successful v1 creation and receipt recovery against authorized PostgreSQL-backed staging.
 - [ ] Serve the v1 page and its assets through an approved same-origin frontend hosting arrangement. The backend staging middleware intentionally rejects static page routes; do not weaken it or route real users to legacy SQLite.
 
-Q1 status: source implementation complete for this scope; browser acceptance and hosted integration remain unverified.
+Q1 status: source implementation and prior automated browser checks passed; visual inspection and hosted integration remain unverified.
 
 ## Q2 — Verified staff identity and operational workspaces
-- [x] Implement the versioned staff workspace at `/static/staff-v1.html` in development, preserving legacy pages.
-- [x] Supabase password sign-in adapter with deployment-owned, publishable-only provider configuration, memory-only access token, explicit reauthentication on expiry, and local signout with best-effort provider revocation.
-- [x] Hotel code selection, server-authorized reception queue, claim and reply; clear old property data and reject stale results.
-- [x] Membership invite, accept and revoke commands for existing provider identities; do not imply identity provisioning or email delivery.
-- [x] Read/update hotel settings with optimistic revision checks; AI setting is read-only.
-- [x] Versioned department ticket list, creation, priority, category, case linkage, claim/start/resolve/reopen/note actions and overdue display; reuse ticket key on unconfirmed retry.
-- [x] Responsive layouts, status filters, text-only rendering of private records, access-denied recovery and signout cleanup.
-- [x] Seven focused Q2 contract tests passed against fetched committed source in an isolated JS harness, not hosted API calls.
-- [x] Add Chromium staff UI fixture journey and 24 authenticated-module viewport checks. CI runner changed to Ubuntu 24.04 to fix Playwright installation failure on 26.04.
-- [ ] Run full Chromium suite on the corrected runner and inspect rendered interfaces.
-- [ ] Configure the approved Supabase identity project in deployment and test with authorized staff identities against PostgreSQL. Default sign-in is disabled; OIDC interactive login, MFA and account recovery are not implemented here.
-- [ ] Deploy same-origin v1 API routing and static frontend hosting together without weakening backend staging guard.
-- [ ] Connect property membership listing, staff roster, shift scheduling, shift handover, room readiness and escalation assignment workflows when versioned backend contracts exist. Current ticket due dates and reopen operations do not constitute workforce scheduling or full guest-confirmed resolution.
-- [ ] Verify actual role permissions, staff identity lifecycle and cross-tenant isolation on hosted integration. Browser fixture tests do not establish production security.
+- [x] Versioned staff workspace with legacy pages preserved.
+- [x] Configurable Supabase password sign-in, memory-only token, expiry, local signout and provider revocation attempt.
+- [x] Hotel selection, server-authorized reception queue, claim and reply.
+- [x] Membership invite, accept and revoke for existing provider identities.
+- [x] Hotel settings read/update with optimistic revision control.
+- [x] Department tickets, category/priority, overdue display, case linkage, retry and transitions.
+- [x] Responsive layouts, filters, text-only private record rendering and property/session cleanup.
+- [x] Staff roster and employee profile updates using the schedule/profile contracts on backend PR #3.
+- [x] Shift scheduling, date-range selection and cancellation using backend PR #3.
+- [x] Operational room condition and revision-checked updates using backend PR #3. No occupancy or availability assertion.
+- [x] Reception transfer, escalation and staff resolution with reasons. Guest receipt UI recognizes escalated/resolved without claiming guest confirmation.
+- [x] Ten staff and seven guest contract tests passed using fetched committed source in isolated JS harnesses; new UI syntax and static ID checks passed.
+- [x] Previous full Chromium suite passed in GitHub Actions run 45694066700 (36 route-width and 24 staff fixture layout checks).
+- [x] Extend browser fixtures for schedule, escalation and room operations; 36 authenticated staff module-width checks now authored.
+- [ ] Run and verify the expanded Chromium suite on the current revision and perform visual inspection.
+- [ ] Configure an approved identity project and test real staff identities, roles and session lifecycle against authorized hosted PostgreSQL. OIDC interactive login, MFA and recovery remain outside this implementation.
+- [ ] Verify same-origin API routing and frontend hosting without weakening the staging guard.
+- [ ] Connect dedicated shift handover and guest-confirmed resolution when their backend contracts exist. Neither a ticket note nor a staff resolve command substitutes for them.
 
-Q2 status: source implementation committed for available versioned staff API contracts; remaining workflows, activation and end-to-end acceptance remain open.
+Q2 status: 14 of 18 checklist items implemented or evidenced (78% by equal checklist count, not engineering effort). Hosted acceptance and the remaining missing contracts prevent closing Q2. API source contracts are on the unmerged backend branch; frontend fixtures are not proof of live integrations.
 
 ## Q3 — Reservations, guest stay and commerce
 - [ ] Hotel discovery, approved property content and room inventory.
