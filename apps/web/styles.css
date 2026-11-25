@@ -270,3 +270,26 @@ fieldset:disabled{opacity:.72}
 .staff-check input{width:20px;height:20px;flex:none}
 @media(max-width:767px){.staff-login{margin:24px auto;padding:20px}.staff-context{grid-template-columns:minmax(0,1fr)}.staff-context label,.staff-context p{grid-column:1}.staff-v1-nav{gap:2px 14px}#staff-workspace [data-panel]{padding:18px}}
 @media(max-width:390px){.staff-login,#staff-workspace [data-panel]{padding:14px}.staff-v1-nav button{font-size:13px}.staff-record .actions button{flex:1 1 100%}}
+
+/* Q3: guest catalog and operational commerce. */
+#hotel-catalog,#guest-commerce{margin:24px 0;scroll-margin-top:16px}
+.commerce-catalog-section{padding:22px 0;border-top:1px solid #e5e5e5}
+.commerce-catalog-section h3{font-size:22px;letter-spacing:-.025em;margin:0 0 14px}
+.commerce-catalog-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px 26px}
+.commerce-catalog-grid>.staff-record{border-top:0;padding:8px 0;min-width:0}
+.commerce-catalog-grid h4{margin:0 0 10px;font-size:17px;line-height:1.35}
+#catalog-form{max-width:460px;margin:14px 0}
+#catalog-form .button,#guest-commerce form>.button,#staff-workspace [data-panel] form>.button{margin-top:12px}
+#guest-commerce h3,#staff-workspace [data-panel]>h3{margin:24px 0 12px;font-size:20px;letter-spacing:-.02em}
+#guest-commerce form{padding:14px 0;border-bottom:1px solid #e5e5e5}
+#guest-commerce .staff-record,#guest-venue-requests{overflow-wrap:anywhere}
+#order-menu{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 24px}
+#order-menu .staff-record{padding:12px 0}
+#order-menu input[type=number]{max-width:100%;width:100px}
+#checkout-result:not(:empty){padding:16px;background:#f5f5f5;margin:16px 0;border-radius:8px}
+#checkout-result a{display:inline-flex;align-items:center}
+#catalog-management-forms details{padding:18px 0}
+#catalog-management-forms form{max-width:640px}
+#staff-workspace input[type=date],#staff-workspace input[type=datetime-local],#guest-commerce input[type=date],#guest-commerce input[type=datetime-local]{width:100%;max-width:100%;min-width:0}
+@media(max-width:1023px){.commerce-catalog-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:599px){.commerce-catalog-grid,#order-menu{grid-template-columns:minmax(0,1fr);gap:8px}.commerce-catalog-section{padding:16px 0}.commerce-catalog-section h3{font-size:20px}#guest-commerce .button{margin-top:8px}}
