@@ -18,6 +18,13 @@ ROLE_CONNECTIONS = (
 )
 
 
+OPTIONAL_PROVIDER_ROLES = (
+    ("WF_PAYMENT_PROVIDER_POSTGRES_DSN", "wf_payment_provider"),
+    ("WF_POS_PROVIDER_POSTGRES_DSN", "wf_pos_provider"),
+    ("WF_PMS_PROVIDER_POSTGRES_DSN", "wf_pms_provider"),
+)
+
+
 def staging_ready():
     try:
         if os.getenv("WF_IDENTITY_PROVIDER") != "supabase" or not os.getenv("WF_SUPABASE_URL") or not os.getenv("WF_SUPABASE_PUBLISHABLE_KEY"):
@@ -26,7 +33,9 @@ def staging_ready():
             return False
         if _keyring() is None:
             _configured_key()
-        for env, role in ROLE_CONNECTIONS:
+        # An unconfigured provider is not a dependency of the native hotel engine.
+        optional = tuple((env,role) for env,role in OPTIONAL_PROVIDER_ROLES if os.getenv(env))
+        for env, role in ROLE_CONNECTIONS + optional:
             dsn = os.getenv(env)
             if not dsn:
                 return False
