@@ -501,3 +501,6 @@ install_staff_lifecycle_routes(app)
 
 from property_config import install_property_config_routes
 install_property_config_routes(app)
+
+from private_documents import install_document_routes
+install_document_routes(app)
