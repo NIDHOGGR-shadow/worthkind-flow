@@ -34,7 +34,7 @@
     if(!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)||fields.name.length<2||fields.contact.length<5||fields.details.length<8){say("v1-submit-status","Check the hotel code and required details.");return;}
     say("v1-submit-status","Submitting your request…");
     try{const task=journey.submit(slug,fields);controls();const result=await task;say("v1-submit-status","Request recorded by the server.");render(result,true);}
-    catch(err){say("v1-submit-status",err.message+" No new request will be created unless you explicitly discard the pending one.");}
+    catch(err){say("v1-submit-status",err.message+(journey.pending?" Keep this page open and retry unchanged, or explicitly discard the pending request.":""));}
     finally{controls();}
   });
   el("v1-recover-form").addEventListener("submit",async e=>{
