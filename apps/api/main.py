@@ -562,3 +562,6 @@ install_ai_routes(app)
 
 from ai_automation import install_ai_automation_routes
 install_ai_automation_routes(app)
+
+from ai_voice import install_voice_routes
+install_voice_routes(app)
