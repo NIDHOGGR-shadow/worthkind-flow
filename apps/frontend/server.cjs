@@ -6,7 +6,7 @@ const {staffConfig}=require("../web/staff-v1-core.js");
 const WEB=path.resolve(__dirname,"../web");
 const ASSETS=new Map([
  ["/","guest-v1.html"],["/staff","staff-v1.html"],
- ...["guest-v1.html","staff-v1.html","styles.css","guest-v1-core.js","guest-v1.js","staff-v1-core.js","staff-v1.js","commerce-core.js","guest-commerce.js","staff-commerce.js","management-core.js","staff-management.js","guest-management.js","native-booking-core.js","native-booking-guest.js","native-booking-staff.js"].map(f=>["/static/"+f,f])
+ ...["guest-v1.html","staff-v1.html","styles.css","guest-v1-core.js","guest-v1.js","staff-v1-core.js","staff-v1.js","commerce-core.js","guest-commerce.js","staff-commerce.js","management-core.js","staff-management.js","guest-management.js","native-booking-core.js","native-booking-guest.js","native-booking-staff.js","provider-evidence-core.js","provider-evidence-ui.js"].map(f=>["/static/"+f,f])
 ]);
 const LIMIT=2_000_000, RESPONSE_LIMIT=8_000_000;
 const UUID="[0-9a-fA-F-]{36}";
@@ -28,7 +28,7 @@ const allowed=[
  ["GET","/staff/procurement"],["GET","/staff/purchase-batches"],["POST","/staff/purchase-batches"],["POST","/staff/purchase-batches/"+UUID+"/decision"],["POST","/staff/stock/items"],["POST","/staff/suppliers"],["PUT","/staff/suppliers/"+UUID+"/state"],["POST","/staff/purchase-orders"],["POST","/staff/purchase-orders/"+UUID+"/decision"],["POST","/staff/stock/movements"],
  ["GET","/vacancies"],["POST","/staff/vacancies"],["POST","/staff/vacancies/"+UUID+"/decision"],["GET","/staff/applications"],["POST","/staff/applications/"+UUID+"/decision"],
  ["GET","/guest/cases/"+UUID+"/preferences"],["PUT","/guest/cases/"+UUID+"/preferences"],["POST","/guest/cases/"+UUID+"/feedback"],["POST","/guest/cases/"+UUID+"/applications"],
- ["GET","/staff/feedback"],["POST","/staff/feedback/"+UUID+"/review"],
+ ["GET","/staff/pms/reservation-evidence"],["POST","/staff/pms/reservation-evidence"],["GET","/staff/pms/commands"],["GET","/staff/pos/reconciliation"],["POST","/staff/pos/orders/"+UUID+"/reconcile"],["GET","/staff/finance/settlements"],["GET","/staff/finance/settlements/[0-9]{1,20}/transactions"],["GET","/staff/feedback"],["POST","/staff/feedback/"+UUID+"/review"],
  ["GET","/native-availability"],["PUT","/staff/bookable-rates"],["GET","/staff/native-bookings"],["POST","/staff/native-bookings/holds"],["POST","/staff/native-bookings/"+UUID+"/cancel"],["GET","/guest/cases/"+UUID+"/native-bookings"],["POST","/guest/cases/"+UUID+"/native-bookings/"+UUID+"/(?:confirm|change-dates)"]
 ].map(([method,suffix])=>[method,new RegExp("^/api/v1/properties/[a-z0-9]+(?:-[a-z0-9]+)*"+suffix+"$")]);
 function config(env){
