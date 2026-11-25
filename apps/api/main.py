@@ -18,6 +18,7 @@ from ticketing import create_ticket_tables, install_ticket_routes
 from operations import install_operations_routes
 from sla import install_sla_routes
 from delivery_contract import create_delivery_tables, install_delivery_routes
+from agent_policy import install_assistant_routes
 from knowledge import create_knowledge_tables, install_knowledge_routes, identify_knowledge_key
 
 APP_ENV = os.getenv("WF_ENV", "development")
@@ -388,3 +389,6 @@ install_operations_routes(app, database, property_id, require_staff)
 install_sla_routes(app, database, property_id, require_staff)
 install_delivery_routes(app, database, property_id, require_staff)
 install_knowledge_routes(app, database, property_id, require_staff)
+
+
+install_assistant_routes(app, database, property_id, require_staff, route_intent, identify_knowledge_key)
