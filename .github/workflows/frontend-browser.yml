@@ -3,6 +3,8 @@ on:
   pull_request:
     paths:
       - 'apps/web/**'
+      - 'apps/frontend/**'
+      - 'Dockerfile.frontend'
       - 'apps/api/**'
       - 'scripts/local_dev.py'
       - '.github/workflows/frontend-browser.yml'
