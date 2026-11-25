@@ -529,3 +529,6 @@ install_staff_operations(app)
 
 from guest_records_pg import install_guest_records
 install_guest_records(app)
+
+from reservations_pg import install_reservation_routes
+install_reservation_routes(app)
