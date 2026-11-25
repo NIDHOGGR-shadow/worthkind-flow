@@ -29,6 +29,7 @@ function commerceApi(fetcher,session){
  const order=r=>record(r)&&COM_DINING.includes(r.state)&&money(r);
  const result=(d,expected,state)=>{valid(record(d)&&(!expected||d.id===expected)&&(!state||d.state===state));return d;};
  return {
+   async menu(s){return arr(await call(s,"/menu"),"items",x=>COM_UUID.test(x.id)&&typeof x.name==="string"&&money(x));},
    async catalog(s){const [c,r,m,v]=await Promise.all([call(s,"/content"),call(s,"/rooms"),call(s,"/menu"),call(s,"/venues")]);return {content:arr(c,"content",x=>typeof x.key==="string"&&x.content&&typeof x.content.title==="string"&&typeof x.content.body==="string"),rooms:arr(r,"rooms",x=>COM_UUID.test(x.id)&&typeof x.name==="string"&&integer(x.max_guests,1,30)),menu:arr(m,"items",x=>COM_UUID.test(x.id)&&typeof x.name==="string"&&money(x)),venues:arr(v,"venues",x=>COM_UUID.test(x.id)&&typeof x.name==="string"&&integer(x.capacity,1,100000))};},
    async intents(a){const d=await guest(a,"/reservation-intents");valid(d.booking_confirmed===false&&d.inventory_held===false);return arr(d,"intents",intent);},
    async requestStay(a,b){stay(b.arrival,b.departure);valid(integer(b.adults,1,30)&&integer(b.children,0,30)&&integer(b.room_count,1,10));key(b.request_key);if(b.room_type_id)id(b.room_type_id);const d=await guest(a,"/reservation-intents","POST",b);valid(intent(d)&&d.booking_confirmed===false&&d.inventory_held===false);return d;},
