@@ -95,3 +95,30 @@ The earlier shared `WF_POSTGRES_DSN` is **not** used by these v1 functions. CI c
 - Migration 007 and apps/api/event_projector.py build a durable internal case activity ledger. Configure a distinct private WF_EVENT_PROJECTOR_POSTGRES_DSN login with only wf_event_projector role access. Run from apps/api with python event_projector.py, or add --once for a single bounded batch. Concurrent workers use SKIP LOCKED and atomic projection; failed transactions leave work pending. This is not a notification worker and does not update external delivery state.
 - CI run 45687757148 passed the PostgreSQL integration and SQLite runtime jobs at commit 86ba045f18e20f77cc15f2398fa7d314de92bf65 (before migrations 006 and 007). New changes need their own passing CI evidence.
 - No dedicated hosted Flow database has been identified; do not point the Flow credentials at the landlord, Hotel OS or Student Creators database. Production startup remains blocked. Private role credentials, function ownership hardening, TLS, secrets/key management, hosted verification and full migration are still outstanding.
+
+
+## Hosted Supabase staging foundation (25 November 2026)
+
+Owner authorized selecting an existing project. Selected Primary account project ref `xfxqlcmsfkbvbybkrppq` (eu-west-1). It already hosts seven unrelated public tables, and initially had no Auth users, storage buckets or Flow schema/roles. Keep all Flow tables in the private `worthkind_flow` schema; do not expose it in the Data API, reuse a project service key as a database login, or change unrelated public objects. Shared compute, backup and Auth boundaries mean a separate dedicated production project remains preferable.
+
+Migrations 001–011 applied successfully through Supabase. Hosted checks: 14/14 tables have forced RLS; anon, authenticated and service_role have no schema usage or function execution privileges. A rolled-back synthetic smoke test registered a hotel, activated an owner, resolved membership, consumed a quota, created a case and projected an internal event without marking external delivery. Follow-up counts for organizations, properties, staff identities and guest cases were all zero. Security advisor reports intentional deny-by-default private tables without public policies; unrelated public RPC warnings were not modified.
+
+### Server connection configuration
+
+- WF_IDENTITY_PROVIDER=supabase
+- WF_SUPABASE_URL=https://xfxqlcmsfkbvbybkrppq.supabase.co
+- WF_SUPABASE_PUBLISHABLE_KEY: project publishable (or legacy anon) key.
+- WF_ENABLE_PG_GUEST_API=1 for the versioned guest route.
+- WF_DATA_KEY_B64 and WF_GUEST_QUOTA_SECRET: distinct random server secrets, never commit them.
+- WF_GUEST_POSTGRES_DSN: restricted login permitted SET ROLE wf_guest_api.
+- WF_STAFF_POSTGRES_DSN: restricted login permitted SET ROLE wf_auth_lookup, wf_staff_runtime, wf_staff_commands.
+- WF_STAFF_LIFECYCLE_POSTGRES_DSN: restricted login permitted SET ROLE wf_staff_lifecycle.
+- WF_EVENT_PROJECTOR_POSTGRES_DSN: restricted login permitted SET ROLE wf_event_projector.
+- WF_HOTEL_PROVISIONER_POSTGRES_DSN: operator-only login permitted SET ROLE wf_hotel_provisioner.
+- WF_PROPERTY_CONFIG_POSTGRES_DSN: restricted login permitted SET ROLE wf_property_config.
+- WF_GUEST_QUOTA_POSTGRES_DSN: restricted login permitted SET ROLE wf_guest_quota.
+- WF_DOCUMENT_POSTGRES_DSN: restricted login permitted SET ROLE wf_document_store.
+
+Use private TLS PostgreSQL connections, with certificate verification, separate restricted login roles, and secrets stored in the deployment environment. No application login credentials were provisioned in this session. Use the verified Auth UUID as the provider subject when registering or activating a staff member. Supabase Auth adapter calls the project's Auth server rather than trusting user metadata; local test coverage uses a simulated HTTP transport, not a real sign-in.
+
+The new database recovery workflow applies every migration in a disposable PostgreSQL 17 service, creates synthetic evidence, dumps the Flow schema and restores into another disposable database, then verifies recovered data and RLS. It does not back up the real hosted database or prove a cross-project disaster recovery capability. The production startup guard is unchanged. SQLite routes, full data migration, restricted login provisioning, live Auth verification, key rotation, public media storage, production infrastructure, and independent backup/restore still require work.
