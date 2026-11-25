@@ -2,6 +2,7 @@
 const COM_UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const COM_INTENTS=["requested","under_review","declined","withdrawn"];
 const COM_DINING=["submitted","accepted","preparing","ready","served","rejected","cancelled"];
+function commerceMoney(r){const amount=r.amount_minor??r.total_minor??r.price_minor;if(!Number.isSafeInteger(amount)||typeof r.currency!=="string")return "Amount unavailable";try{const f=new Intl.NumberFormat(undefined,{style:"currency",currency:r.currency,currencyDisplay:"code"});return f.format(amount/10**f.resolvedOptions().maximumFractionDigits);}catch{return r.currency+" "+amount+" minor units";}}
 function commerceApi(fetcher,session){
  const fail=(message,status=0)=>Object.assign(Error(message),{status});
  const valid=(v)=>{if(!v)throw fail("Unexpected service response. Check the current records.");};
@@ -58,4 +59,4 @@ function commerceApi(fetcher,session){
    async refundAction(s,i,action){valid(["approve","decline","submit","verify"].includes(action));const d=result(await staff(s,"/finance/refunds/"+id(i)+"/"+(["approve","decline"].includes(action)?"decision":action),"POST",["approve","decline"].includes(action)?{action}:undefined),i);if(["submit","verify"].includes(action))valid(["test","live"].includes(d.mode));return d;}
  };
 }
-if(typeof module!=="undefined"&&module.exports)module.exports={commerceApi};
+if(typeof module!=="undefined"&&module.exports)module.exports={commerceApi,commerceMoney};
