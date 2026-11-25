@@ -1,0 +1,34 @@
+"use strict";
+function nativeBookingApi(fetcher,session){
+ const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+ const bad=(m,status=0)=>Object.assign(new Error(m),{status});
+ const valid=(x)=>{if(!x)throw bad("Invalid booking details or unexpected server response. Refresh before continuing.");};
+ const id=x=>{valid(typeof x==="string"&&uuid.test(x));return x;};
+ const date=x=>typeof x==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(x)&&Number.isFinite(Date.parse(x))&&new Date(x).toISOString().slice(0,10)===x;
+ const nights=(a,d)=>{valid(date(a)&&date(d));const n=(Date.parse(d)-Date.parse(a))/86400000;valid(n>=1&&n<=90);return n;};
+ const currency=x=>typeof x==="string"&&/^[A-Z]{3}$/.test(x);
+ const amount=x=>Number.isSafeInteger(x)&&x>=1&&x<=900000000000000;
+ const policy=x=>typeof x==="string"&&x.length>=8&&x.length<=240;
+ const booking=(b,expected)=>{valid(b&&uuid.test(b.id)&&(!expected||b.id===expected)&&["held","expired","confirmed","cancelled"].includes(b.state)&&currency(b.currency)&&amount(b.total_minor)&&Number.isSafeInteger(b.revision)&&b.revision>=1&&date(b.arrival)&&date(b.departure)&&Number.isInteger(b.room_count)&&b.room_count>=1&&b.room_count<=10);return b;};
+ async function call(slug,path,method="GET",body,scope="public",token){
+  valid(typeof slug==="string"&&slug.length<=100&&/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug));
+  const headers={Accept:"application/json"};if(scope==="staff")headers.Authorization="Bearer "+session.token();if(scope==="guest"){valid(typeof token==="string"&&/^[A-Za-z0-9_-]{32,128}$/.test(token));headers["X-Receipt-Token"]=token;}if(body!==undefined)headers["Content-Type"]="application/json";
+  let r;try{r=await fetcher("/api/v1/properties/"+encodeURIComponent(slug)+path,{method,headers,...(body===undefined?{}:{body:JSON.stringify(body)}),cache:"no-store",credentials:"same-origin",redirect:"error"});}catch{throw bad("Connection interrupted. Booking outcome unknown; refresh the record before retrying.");}
+  if(!r.ok)throw bad(({401:"Session rejected. Sign in again.",403:"Access denied.",404:"Booking or native inventory unavailable.",409:"Conflict. Refresh before continuing.",422:"Stay, rate or inventory unavailable. Refresh before continuing.",429:"Rate limit reached.",503:"Service unavailable or outcome unknown."})[r.status]||"Booking service did not confirm the operation.",r.status);
+  try{return await r.json();}catch{throw bad("Unreadable booking response.");}
+ }
+ const staff=(s,p,m,b)=>call(s,"/staff"+p,m,b,"staff");
+ const guest=(a,p,m,b)=>call(a.slug,"/guest/cases/"+id(a.case_id)+"/native-bookings"+p,m,b,"guest",a.token);
+ return {
+  async availability(s,a,d){nights(a,d);const r=await call(s,"/native-availability?"+new URLSearchParams({arrival:a,departure:d}));valid(r.source==="native_inventory"&&r.inventory_held===false&&Array.isArray(r.room_types)&&r.room_types.every(t=>uuid.test(t.room_type_id)&&typeof t.name==="string"&&Number.isInteger(t.max_guests)&&Number.isSafeInteger(t.rooms_available)&&t.rooms_available>=0&&Array.isArray(t.rates)&&t.rates.every(v=>uuid.test(v.id)&&currency(v.currency)&&amount(v.nightly_total_minor)&&policy(v.policy_reference))));return r.room_types;},
+  total(rate,arrival,departure,rooms){valid(Number.isInteger(rooms)&&rooms>=1&&rooms<=10&&amount(rate.nightly_total_minor));const total=rate.nightly_total_minor*nights(arrival,departure)*rooms;valid(amount(total));return total;},
+  async saveRate(s,b){id(b.room_type_id);valid(/^[A-Za-z0-9_-]{2,40}$/.test(b.code)&&currency(b.currency)&&amount(b.nightly_total_minor)&&b.nightly_total_minor<=1000000000000&&date(b.start_date)&&date(b.end_date)&&b.end_date>b.start_date&&policy(b.policy_reference)&&typeof b.active==="boolean"&&Number.isInteger(b.revision)&&b.revision>=0);const d=await staff(s,"/bookable-rates","PUT",b);valid(uuid.test(d?.id)&&Number.isInteger(d.revision)&&d.revision>b.revision);return d;},
+  async hold(s,b){id(b.intent_id);id(b.room_type_id);id(b.rate_id);valid(typeof b.request_key==="string"&&/^[A-Za-z0-9_-]{8,100}$/.test(b.request_key));const d=booking(await staff(s,"/native-bookings/holds","POST",b));valid(d.intent_id===b.intent_id&&d.room_type_id===b.room_type_id&&d.rate_id===b.rate_id);return d;},
+  async staffList(s){const d=await staff(s,"/native-bookings");valid(d.source==="native_inventory"&&Array.isArray(d.bookings));return d.bookings.map(b=>booking(b));},
+  async guestList(a){const d=await guest(a,"");valid(d.source==="native_inventory"&&Array.isArray(d.bookings));return d.bookings.map(b=>booking(b));},
+  async confirm(a,b,accepted){valid(accepted===true&&b.state==="held"&&amount(b.total_minor)&&policy(b.policy_reference));const d=await guest(a,"/"+id(b.id)+"/confirm","POST",{expected_total_minor:b.total_minor,payment_method:"pay_at_property",accept_terms:true});const r=booking(d.booking,b.id);valid(d.source==="native_inventory"&&d.booking_confirmed===true&&d.payment_confirmed===false&&d.payment_method==="pay_at_property"&&r.state==="confirmed"&&r.total_minor===b.total_minor&&r.currency===b.currency);return r;},
+  async change(a,b,quote,accepted){valid(accepted===true&&b.state==="confirmed"&&quote.currency===b.currency&&policy(quote.policy_reference));const total=this.total(quote,quote.arrival,quote.departure,b.room_count);const body={revision:b.revision,arrival:quote.arrival,departure:quote.departure,rate_id:id(quote.id),expected_total_minor:total,expected_currency:quote.currency,policy_reference:quote.policy_reference,accept_terms:true};const d=await guest(a,"/"+id(b.id)+"/change-dates","POST",body);const r=booking(d.booking,b.id);valid(d.source==="native_inventory"&&d.payment_method==="pay_at_property"&&r.state==="confirmed"&&r.total_minor===total&&r.currency===quote.currency&&r.arrival===quote.arrival&&r.departure===quote.departure&&r.revision>b.revision);return r;},
+  async cancel(s,b,reason){valid(["held","confirmed"].includes(b.state)&&Number.isInteger(b.revision)&&b.revision>=1&&typeof reason==="string"&&reason.length>=8&&reason.length<=240);const d=booking(await staff(s,"/native-bookings/"+id(b.id)+"/cancel","POST",{revision:b.revision,reason}),b.id);valid(d.state==="cancelled"&&d.revision>b.revision);return d;}
+ };
+}
+if(typeof module!=="undefined"&&module.exports)module.exports={nativeBookingApi};
