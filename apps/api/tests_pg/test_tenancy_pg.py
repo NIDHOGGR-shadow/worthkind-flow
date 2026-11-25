@@ -24,7 +24,7 @@ import pytest
 
 MIGRATIONS = [
     Path(__file__).resolve().parents[3] / "db" / "migrations" / name
-    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql", "008_hotel_onboarding_settings.sql", "009_identity_provisioning.sql", "010_guest_quota.sql", "011_private_documents.sql", "012_operational_tickets.sql", "013_content_catalog.sql", "014_rooms_rates.sql", "015_rate_lookup_qualification.sql", "016_inventory_procurement.sql", "017_dining_kitchen.sql", "018_menu_lock_qualification.sql", "019_department_roles.sql", "020_staff_shifts.sql", "021_guest_preferences_feedback.sql", "022_reservation_intents.sql", "023_hotel_finance.sql")
+    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql", "008_hotel_onboarding_settings.sql", "009_identity_provisioning.sql", "010_guest_quota.sql", "011_private_documents.sql", "012_operational_tickets.sql", "013_content_catalog.sql", "014_rooms_rates.sql", "015_rate_lookup_qualification.sql", "016_inventory_procurement.sql", "017_dining_kitchen.sql", "018_menu_lock_qualification.sql", "019_department_roles.sql", "020_staff_shifts.sql", "021_guest_preferences_feedback.sql", "022_reservation_intents.sql", "023_hotel_finance.sql", "024_events_recruitment.sql", "025_pms_accounts.sql")
 ]
 
 
@@ -1071,3 +1071,57 @@ def test_guest_receipt_preferences_and_reservation_intent(pg, oidc_rig, monkeypa
     assert client.post(review,json={"action":"review"},headers=owner).json()["state"]=="under_review"
     assert client.post(g+"/reservation-intents/"+iid+"/withdraw",headers=proof).json()["state"]=="withdrawn"
     assert client.post(g+"/feedback",json={"rating":4,"comment":"Test feedback"},headers=proof).status_code==409
+
+
+def test_invoice_and_payment_verification_contract_disposable(pg, oidc_rig, monkeypatch):
+    # This fixture is restricted to the disposable worthkind_ci database.
+    # No PSP network call, charge, settlement or transfer occurs.
+    client,key,source=oidc_rig
+    monkeypatch.setenv("WF_OPERATIONS_POSTGRES_DSN",os.environ["WF_STAFF_POSTGRES_DSN"])
+    owner=auth_header(signed_token(key,"idp:hotel-a-owner"))
+    base="/api/v1/properties/hotel-a/staff"
+    item=client.put(base+"/menu",json={"code":"meal","name":"Meal","price_minor":2500,"currency":"NGN","available":True,"revision":0},headers=owner).json()["id"]
+    order=client.post(base+"/dining/orders",json={"request_key":"invoice-food-test","lines":[{"item_id":item,"quantity":2}]},headers=owner).json()["id"]
+    for action in ("accept","prepare","ready","serve"):
+        assert client.post(base+"/dining/orders/"+order+"/transition",json={"action":action},headers=owner).status_code==200
+    inv=client.post(base+"/finance/invoices",json={"dining_order_id":order},headers=owner)
+    assert inv.status_code==201,inv.text
+    iid=inv.json()["id"]
+    assert client.post(base+"/finance/invoices",json={"dining_order_id":order},headers=owner).json()["id"]==iid
+    assert client.post(base+"/finance/invoices/"+iid+"/checkout",json={"email":"test@example.invalid"},headers=owner).status_code==503
+    report=client.get(base+"/finance",headers=owner).json()
+    assert report["invoices"][0]["amount_minor"]==5000
+    assert report["invoices"][0]["state"]=="issued"
+    assert report["payments"]==[]
+
+
+def test_department_publication_and_event_conflict_disposable(pg, oidc_rig, monkeypatch):
+    from datetime import datetime,timedelta,timezone,date
+    client,key,source=oidc_rig
+    monkeypatch.setenv("WF_OPERATIONS_POSTGRES_DSN",os.environ["WF_STAFF_POSTGRES_DSN"])
+    monkeypatch.setenv("WF_PUBLIC_CONTENT_POSTGRES_DSN",os.environ["WF_GUEST_POSTGRES_DSN"])
+    owner=auth_header(signed_token(key,"idp:hotel-a-owner"))
+    reception=auth_header(signed_token(key,"idp:hotel-a-reception"))
+    base="/api/v1/properties/hotel-a"
+    venue=client.post(base+"/staff/venues",json={"name":"Conference hall","capacity":100},headers=owner).json()["id"]
+    token="v"*43
+    case=client.post(base+"/enquiries",json={"request_key":"venue-test-case","kind":"events","name":"Test Guest","contact":"test@example.invalid","details":"Request a conference venue","receipt_token":token}).json()["case_id"]
+    starts=datetime.now(timezone.utc)+timedelta(days=3)
+    payload={"venue_id":venue,"starts_at":starts.isoformat(),"ends_at":(starts+timedelta(hours=4)).isoformat(),"attendance":50,"request_key":"venue-test-001"}
+    path=base+"/guest/cases/"+case+"/venue-requests"
+    r=client.post(path,json=payload,headers={"x-receipt-token":token})
+    assert r.status_code==201,r.text
+    first=r.json()["id"]
+    payload["request_key"]="venue-test-002"
+    second=client.post(path,json=payload,headers={"x-receipt-token":token}).json()["id"]
+    for rid in (first,second):
+        assert client.post(base+"/staff/venue-requests/"+rid+"/decision",json={"action":"review"},headers=owner).status_code==200
+    assert client.post(base+"/staff/venue-requests/"+first+"/decision",json={"action":"accept"},headers=owner).status_code==200
+    assert client.post(base+"/staff/venue-requests/"+second+"/decision",json={"action":"accept"},headers=owner).status_code==409
+    vacancy={"title":"Kitchen assistant","description":"Prepare ingredients for hotel kitchen","deadline":(date.today()+timedelta(days=30)).isoformat()}
+    v=client.post(base+"/staff/vacancies",json=vacancy,headers=owner)
+    assert v.status_code==201,v.text
+    assert client.get(base+"/vacancies").json()["vacancies"]==[]
+    assert client.post(base+"/staff/vacancies/"+v.json()["id"]+"/decision",json={"action":"publish"},headers=owner).status_code==200
+    assert len(client.get(base+"/vacancies").json()["vacancies"])==1
+    assert client.get(base+"/staff/applications",headers=reception).status_code==403
