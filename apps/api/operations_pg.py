@@ -36,14 +36,14 @@ def actor(authorization):
         raise HTTPException(503,"Identity unavailable") from None
 
 
-def command(query,params,*,many=False,public=False):
-    dsn=os.getenv("WF_PUBLIC_CONTENT_POSTGRES_DSN" if public else "WF_OPERATIONS_POSTGRES_DSN")
+def command(query,params,*,many=False,public=False,guest=False):
+    dsn=os.getenv("WF_GUEST_POSTGRES_DSN" if guest else "WF_PUBLIC_CONTENT_POSTGRES_DSN" if public else "WF_OPERATIONS_POSTGRES_DSN")
     if not dsn:
         raise HTTPException(503,"Operations database unavailable")
     try:
         with psycopg.connect(dsn,connect_timeout=5) as conn:
             with conn.transaction():
-                conn.execute("SET LOCAL ROLE wf_public_content" if public else "SET LOCAL ROLE wf_operations")
+                conn.execute("SET LOCAL ROLE wf_guest_api" if guest else "SET LOCAL ROLE wf_public_content" if public else "SET LOCAL ROLE wf_operations")
                 cursor=conn.execute(query,params)
                 return cursor.fetchall() if many else cursor.fetchone()
     except errors.InsufficientPrivilege:
@@ -52,6 +52,8 @@ def command(query,params,*,many=False,public=False):
         raise HTTPException(404,"Record unavailable") from None
     except (errors.UniqueViolation,errors.CheckViolation,errors.SerializationFailure):
         raise HTTPException(409,"Operation conflicts with current state") from None
+    except errors.InvalidParameterValue:
+        raise HTTPException(422,"Invalid operational command") from None
     except psycopg.Error:
         raise HTTPException(503,"Operations database unavailable") from None
 
