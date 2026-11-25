@@ -535,3 +535,6 @@ install_reservation_routes(app)
 
 from finance_pg import install_finance_routes
 install_finance_routes(app)
+
+from departments_pg import install_department_routes
+install_department_routes(app)
