@@ -4,7 +4,7 @@
   const api=guestApi(window.fetch.bind(window));
   const randomHex=n=>Array.from(crypto.getRandomValues(new Uint8Array(n)),b=>b.toString(16).padStart(2,"0")).join("");
   const journey=createGuestJourney(api,randomHex);
-  const commerce=initGuestCommerce(journey);
+  const commerce=initGuestCommerce(journey,()=>management.busy);
   const management=initGuestManagement(journey,commerce);
   const say=(id,msg)=>{el(id).textContent=msg;};
   const statusText={queued:"Recorded — waiting for staff acceptance",claimed:"Accepted by staff",responded:"Staff response recorded",escalated:"Escalated for staff review",resolved:"Marked resolved by staff — guest confirmation not recorded"};
