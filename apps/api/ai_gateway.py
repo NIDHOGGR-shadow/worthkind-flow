@@ -116,6 +116,14 @@ def install_ai_routes(app):
     def save_policy(slug:str,body:Policy,authorization:str|None=Header(None)):
         return db("SELECT worthkind_flow.manage_ai_policy(%s,%s,%s,%s,%s,%s,%s,%s)",(actor(authorization),slug,body.revision,body.guest_chat,body.staff_assist,body.autonomous_alerts,body.voice_enabled,body.max_calls_per_day),policy=True)[0]
 
+    @app.get(base+"/staff/ai/sources")
+    def list_sources(slug:str,authorization:str|None=Header(None)):
+        return {"sources":db("SELECT worthkind_flow.list_ai_sources(%s,%s)",(actor(authorization),slug),policy=True)[0]}
+
+    @app.get(base+"/staff/ai/usage")
+    def usage(slug:str,authorization:str|None=Header(None)):
+        return db("SELECT worthkind_flow.ai_usage(%s,%s)",(actor(authorization),slug),policy=True)[0]
+
     @app.put(base+"/staff/ai/sources/{content_id}")
     def source_permission(slug:str,content_id:UUID,body:SourcePermission,authorization:str|None=Header(None)):
         allowed=db("SELECT worthkind_flow.manage_ai_source(%s,%s,%s,%s)",(actor(authorization),slug,content_id,body.allowed),policy=True)[0]
