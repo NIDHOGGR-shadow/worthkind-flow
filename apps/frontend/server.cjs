@@ -6,7 +6,7 @@ const {staffConfig}=require("../web/staff-v1-core.js");
 const WEB=path.resolve(__dirname,"../web");
 const ASSETS=new Map([
  ["/","guest-v1.html"],["/staff","staff-v1.html"],
- ...["guest-v1.html","staff-v1.html","styles.css","guest-v1-core.js","guest-v1.js","staff-v1-core.js","staff-v1.js"].map(f=>["/static/"+f,f])
+ ...["guest-v1.html","staff-v1.html","styles.css","guest-v1-core.js","guest-v1.js","staff-v1-core.js","staff-v1.js","commerce-core.js","guest-commerce.js","staff-commerce.js"].map(f=>["/static/"+f,f])
 ]);
 const LIMIT=2_000_000, RESPONSE_LIMIT=8_000_000;
 const UUID="[0-9a-fA-F-]{36}";
@@ -16,7 +16,14 @@ const allowed=[
  ["GET","/staff/tickets"],["POST","/staff/tickets"],["GET","/staff/tickets/"+UUID],["POST","/staff/tickets/"+UUID+"/transition"],
  ["GET","/staff/settings"],["PUT","/staff/settings"],["POST","/staff/memberships/(?:invite|accept|revoke)"],
  ["GET","/staff/schedule"],["PUT","/staff/profiles/"+UUID],["POST","/staff/shifts"],["POST","/staff/shifts/"+UUID+"/cancel"],
- ["GET","/staff/rooms"],["PUT","/staff/rooms/"+UUID+"/state"]
+ ["GET","/staff/rooms"],["PUT","/staff/rooms/"+UUID+"/state"],
+ ["GET","/(?:content|rooms|menu|venues)"],
+ ["GET","/guest/cases/"+UUID+"/reservation-intents"],["POST","/guest/cases/"+UUID+"/reservation-intents"],["POST","/guest/cases/"+UUID+"/reservation-intents/"+UUID+"/withdraw"],["POST","/guest/cases/"+UUID+"/venue-requests"],
+ ["GET","/staff/reservation-intents"],["POST","/staff/reservation-intents/"+UUID+"/review"],
+ ["GET","/staff/pms/availability"],["GET","/staff/pms/reservations/[A-Za-z0-9_-]{1,100}"],
+ ["GET","/staff/dining/orders"],["POST","/staff/dining/orders"],["POST","/staff/dining/orders/"+UUID+"/transition"],
+ ["GET","/staff/venue-requests"],["POST","/staff/venue-requests/"+UUID+"/decision"],
+ ["GET","/staff/finance"],["POST","/staff/finance/invoices"],["POST","/staff/finance/invoices/"+UUID+"/checkout"],["POST","/staff/finance/payments/"+UUID+"/verify"],["POST","/staff/finance/refunds"],["POST","/staff/finance/refunds/"+UUID+"/(?:decision|submit|verify)"]
 ].map(([method,suffix])=>[method,new RegExp("^/api/v1/properties/[a-z0-9]+(?:-[a-z0-9]+)*"+suffix+"$")]);
 function config(env){
  const upstream=new URL(env.WF_FRONTEND_API_ORIGIN||"");
