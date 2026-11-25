@@ -5,7 +5,7 @@
   const randomHex=n=>Array.from(crypto.getRandomValues(new Uint8Array(n)),b=>b.toString(16).padStart(2,"0")).join("");
   const journey=createGuestJourney(api,randomHex);
   const say=(id,msg)=>{el(id).textContent=msg;};
-  const statusText={queued:"Recorded — waiting for staff acceptance",claimed:"Accepted by staff",responded:"Staff response recorded"};
+  const statusText={queued:"Recorded — waiting for staff acceptance",claimed:"Accepted by staff",responded:"Staff response recorded",escalated:"Escalated for staff review",resolved:"Marked resolved by staff — guest confirmation not recorded"};
   function controls(){
     el("request-fields").disabled=journey.busy||journey.pending||!!journey.active;
     el("recover-fields").disabled=journey.busy||journey.pending||!!journey.active;
