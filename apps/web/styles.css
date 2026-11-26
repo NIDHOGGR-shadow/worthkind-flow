@@ -319,3 +319,5 @@ fieldset:disabled{opacity:.72}
 /* Native grouped module selector avoids twenty navigation controls above mobile content. */
 .staff-mobile-modules{display:none;min-width:0}
 @media(max-width:1023px){.staff-module-layout .staff-v1-nav{display:none}.staff-mobile-modules{display:block;border-bottom:1px solid #e5e5e5;padding:0 0 14px}.staff-mobile-modules label{margin:0 0 6px}.staff-mobile-modules select{width:100%;min-height:48px}.staff-module-layout{gap:16px}}
+
+#guest-voice{margin:24px 0;min-width:0}#guest-voice form{max-width:700px}#voice-audio{display:block;max-width:100%;width:min(100%,420px)}#voice-audio[hidden]{display:none}#voice-file{max-width:100%;min-height:44px;height:auto}#voice-answer{overflow-wrap:anywhere}
