@@ -62,6 +62,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
       - run: python -m pip install -r apps/api/requirements.txt -r apps/api/requirements-pg-test.txt
       - run: python -m pytest apps/api/tests_pg -q
 

@@ -1793,3 +1793,95 @@ def test_email_notifications_consent_and_provider_states(pg, seeded):
     with pytest.raises(errors.InsufficientPrivilege):
         with command_session(pg,"wf_guest_api"):
             pg.execute("SELECT * FROM worthkind_flow.email_notifications")
+
+
+def test_combined_gateway_live_http_postgres_journey(pg, oidc_rig, monkeypatch):
+    """Actual loopback gateway -> FastAPI -> disposable PostgreSQL, no live providers."""
+    import httpx
+    import socket
+    import subprocess
+    import threading
+    import select
+    import uvicorn
+    import main
+    from datetime import datetime,timedelta,timezone
+    client,key,source=oidc_rig
+    monkeypatch.setenv("WF_OPERATIONS_POSTGRES_DSN",os.environ["WF_STAFF_POSTGRES_DSN"])
+    monkeypatch.setenv("WF_PUBLIC_CONTENT_POSTGRES_DSN",os.environ["WF_GUEST_POSTGRES_DSN"])
+    monkeypatch.setenv("WF_PLATFORM_CRM_POSTGRES_DSN",make_conninfo(os.environ["WF_TEST_POSTGRES_DSN"],user="wf_ci_crm",password="worthkind_ci_crm_only"))
+    sock=socket.socket()
+    sock.bind(("127.0.0.1",0))
+    sock.listen(128)
+    upstream="http://127.0.0.1:"+str(sock.getsockname()[1])
+    server=uvicorn.Server(uvicorn.Config(main.app,host="127.0.0.1",log_level="error",lifespan="off"))
+    thread=threading.Thread(target=lambda:server.run(sockets=[sock]),daemon=True)
+    thread.start()
+    proc=None
+    try:
+        for _ in range(100):
+            if server.started: break
+            time.sleep(.05)
+        assert server.started
+        root=Path(__file__).resolve().parents[3]
+        js="""const http=require('node:http'); const {handler}=require('./apps/frontend/server.cjs');
+const s=http.createServer(handler({upstream:process.argv[1],identity:{enabled:false}}));
+s.listen(0,'127.0.0.1',()=>console.log(s.address().port));"""
+        proc=subprocess.Popen(["node","-e",js,upstream],cwd=root,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True)
+        assert select.select([proc.stdout],[],[],10)[0], "Gateway did not start"
+        port=int(proc.stdout.readline().strip())
+        with httpx.Client(base_url="http://127.0.0.1:"+str(port),timeout=10) as gw:
+            def auth(subject): return auth_header(signed_token(key,subject))
+            owner=auth("idp:hotel-a-owner")
+            reception=auth("idp:hotel-a-reception")
+            foreign=auth("idp:hotel-b-reception")
+            base="/api/v1/properties/hotel-a"
+            def ok(response,status=200):
+                assert response.status_code==status,response.text
+                assert response.headers.get("cache-control")=="no-store"
+                return response.json()
+            assert ok(gw.get("/api/v1/staff/properties",headers=owner))["properties"][0]["slug"]=="hotel-a"
+            body={**guest_payload(),"request_key":"combined-http-food","kind":"food","details":"Please place a food order"}
+            case=ok(gw.post(base+"/enquiries",json=body),201)["case_id"]
+            proof={"X-Receipt-Token":body["receipt_token"]}
+            guest=base+"/guest/cases/"+case
+            staff=base+"/staff/cases/"+case
+            assert gw.get(base+"/enquiries/"+case,headers={"X-Receipt-Token":"Z"*43}).status_code==404
+            assert gw.get("/api/v1/properties/hotel-b/staff/cases",headers=owner).status_code==403
+            item=ok(gw.put(base+"/staff/menu",headers=owner,json={"code":"rice","name":"Rice","price_minor":2500,"currency":"NGN","available":True,"revision":0}))["id"]
+            order=ok(gw.post(guest+"/dining/orders",headers=proof,json={"request_key":"combined-dining-1","lines":[{"item_id":item,"quantity":2}]}),201)
+            assert order["total_minor"]==5000 and order["state"]=="submitted"
+            assert ok(gw.post(base+"/staff/dining/orders/"+order["id"]+"/transition",headers=owner,json={"action":"accept"}))["state"]=="accepted"
+            assert ok(gw.get(guest+"/dining/orders",headers=proof))["orders"][0]["state"]=="accepted"
+            ok(gw.post(guest+"/consent",headers=proof,json={"purpose":"service_followup","granted":True,"policy_version":"ci-policy"}),201)
+            ok(gw.post(staff+"/claim",headers=reception))
+            reply="Hotel reception recorded an update."
+            ok(gw.post(staff+"/respond",headers=reception,json={"message":reply}))
+            assert ok(gw.get(base+"/enquiries/"+case,headers=proof))["staff_reply"]==reply
+            pg.execute("SELECT worthkind_flow.configure_email_notifications('hotel-a','ci-account','hotel@example.invalid',true,'CI sender verification')")
+            event=ok(gw.get(staff+"/notifications",headers=reception))["notifications"][0]["event_id"]
+            assert ok(gw.post(staff+"/notifications",headers=reception,json={"event_id":event,"verification_reference":"CI contact verification"}),201)["state"]=="pending"
+            now=datetime.now(timezone.utc)
+            shift=ok(gw.post(base+"/staff/shifts",headers=owner,json={"membership_id":str(source["members"]["receptionist"]),"starts_at":(now-timedelta(hours=1)).isoformat(),"ends_at":(now+timedelta(hours=1)).isoformat()}),201)["id"]
+            assert ok(gw.post(base+"/staff/shifts/"+shift+"/attendance",headers=reception,json={"action":"check_in"}))["checked_in_at"]
+            assert ok(gw.post(base+"/staff/shifts/"+shift+"/attendance",headers=reception,json={"action":"check_out"}))["checked_out_at"]
+            leave=ok(gw.post(base+"/staff/leave",headers=reception,json={"request_key":str(uuid4()),"starts_at":(now+timedelta(days=2)).isoformat(),"ends_at":(now+timedelta(days=3)).isoformat(),"leave_kind":"annual"}),201)["id"]
+            assert ok(gw.post(base+"/staff/leave/"+leave+"/decision",headers=owner,json={"action":"approve"}))["state"]=="approved"
+            assert ok(gw.get(base+"/staff/reports/operations",headers=owner))["dining"]["in_service"]==1
+            assert gw.get(base+"/staff/reports/operations",headers=foreign).status_code==403
+            crm="/api/v1/platform/crm/prospects"
+            assert gw.get(crm).status_code==401
+            assert gw.get(crm,headers=owner).status_code==403
+            pg.execute("SELECT worthkind_flow.set_crm_operator('idp:combined-crm-test',true,'CI operator approval')")
+            sales=auth("idp:combined-crm-test")
+            prospect=ok(gw.post(crm,headers=sales,json={"account_key":"combined-"+uuid4().hex,"hotel_name":"CI Hotel","source_reference":"CI referral"}),201)
+            assert prospect["stage"]=="prospect"
+            assert gw.get("/api/v1/platform/crm/operators",headers=sales).status_code==404
+            assert gw.get("/api/v1/properties/hotel-a/webhooks/paystack").status_code==404
+    finally:
+        if proc:
+            proc.terminate()
+            try: proc.wait(timeout=5)
+            except subprocess.TimeoutExpired: proc.kill();proc.wait()
+        server.should_exit=True
+        thread.join(timeout=5)
+        sock.close()
