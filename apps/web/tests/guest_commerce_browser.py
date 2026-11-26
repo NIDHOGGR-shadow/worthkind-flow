@@ -91,9 +91,16 @@ def check_guest_commerce(browser, base):
                 route.fulfill(json={"id":INTENT,"state":"new"})
             elif path == private + "/applications":
                 assert state["kind"] == "careers"
-                assert req.post_data_json["consent"] is True
-                assert req.post_data_json["vacancy_id"] == VENUE
-                route.fulfill(json={"id":INTENT,"state":"submitted"})
+                if req.method == "POST":
+                    assert req.post_data_json["consent"] is True
+                    assert req.post_data_json["vacancy_id"] == VENUE
+                    state["application"]={"id":INTENT,"vacancy_id":VENUE,"title":"Synthetic vacancy","state":"submitted","created_at":"2026-11-26T15:00:00Z"}
+                    route.fulfill(json={"id":INTENT,"state":"submitted"})
+                else:
+                    route.fulfill(json={"applications":[state["application"]] if state.get("application") else [],"next_cursor":None})
+            elif path == private + "/applications/" + INTENT + "/withdraw":
+                state["application"]["state"]="withdrawn"
+                route.fulfill(json={"id":INTENT,"state":"withdrawn"})
             elif path == private + "/reservation-intents" and req.method == "GET":
                 route.fulfill(json={"intents":[state["intent"]] if state["intent"] else [],"booking_confirmed":False,"inventory_held":False})
             elif path == private + "/reservation-intents" and req.method == "POST":
@@ -110,8 +117,13 @@ def check_guest_commerce(browser, base):
                 state["intent"]["state"]="withdrawn"
                 route.fulfill(json={"id":INTENT,"state":"withdrawn","booking_confirmed":False})
             elif path == private + "/venue-requests":
-                assert req.post_data_json["venue_id"] == VENUE
-                route.fulfill(json={"id":VENUE,"state":"requested"})
+                if req.method == "POST":
+                    body=req.post_data_json
+                    assert body["venue_id"] == VENUE
+                    state["venue"]={"id":VENUE,"venue_id":VENUE,"venue_name":"Synthetic hall","starts_at":body["starts_at"],"ends_at":body["ends_at"],"attendance":body["attendance"],"state":"requested"}
+                    route.fulfill(json={"id":VENUE,"state":"requested"})
+                else:
+                    route.fulfill(json={"requests":[state["venue"]] if state.get("venue") else [],"next_cursor":None})
             else:
                 route.fulfill(status=404,json={"detail":"Not found"})
         else:
@@ -205,7 +217,9 @@ def check_guest_commerce(browser, base):
     page.locator("#venue-end").fill("2026-12-01T14:00")
     page.locator("#venue-attendance").fill("20")
     page.locator("#venue-send").click()
-    expect(page.locator("#guest-venue-requests")).to_contain_text(VENUE)
+    expect(page.locator("#guest-venue-requests")).to_contain_text("Synthetic hall")
+    page.locator("#guest-venue-load").click()
+    expect(page.locator("#guest-venue-requests")).to_contain_text("20 attendees")
     page.locator("#guest-journey-bar a[href='#guest-records']").click()
     page.locator("#load-preferences").click()
     expect(page.locator("#preferences-form")).to_be_visible()
@@ -256,6 +270,10 @@ def check_guest_commerce(browser, base):
     page.get_by_role("button", name="Submit application").click()
     expect(page.locator("#application-receipt")).to_contain_text("submitted")
     expect(page.get_by_role("button", name="Submit application")).to_be_disabled()
+    page.locator("#guest-applications-load").click()
+    expect(page.locator("#guest-applications-list")).to_contain_text("Synthetic vacancy")
+    page.get_by_role("button",name="Withdraw application").click()
+    expect(page.locator("#guest-applications-list")).to_contain_text("withdrawn")
     page.locator(".guest-nav a[href='#home']").click()
     page.locator(".guest-service-index a[href='#guest-ai']").click()
     page.locator("#guest-ai-hotel").fill("hotel-a")
