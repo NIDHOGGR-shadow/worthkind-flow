@@ -54,3 +54,15 @@ test("private recovery refresh uses the original hotel; failed refresh preserves
  await j.recover("hotel-a",id,token);await assert.rejects(j.refresh());assert.equal(j.active.token,token);
  assert.deepEqual(calls[0],calls[1]);j.reset();assert.equal(j.active,null);
 });
+
+test("guest resolution decisions use receipt proof, exact resolution ID and verified server state",async()=>{
+ const calls=[],active={slug:"hotel-a",case_id:id,token};
+ const snapshot={case_id:id,case_status:"resolved",resolution_id:id,guest_decision:null,guest_confirmed:false,awaiting_guest_confirmation:true};
+ const api=guestApi(async(url,options)=>{calls.push([url,options]);return ok(options.method==="POST"?{resolution_id:id,decision:"reopen",duplicate:false,current_case_status:"queued"}:snapshot);});
+ assert.equal((await api.resolution(active)).awaiting_guest_confirmation,true);
+ assert.equal((await api.decideResolution(active,id,"reopen")).current_case_status,"queued");
+ assert.deepEqual(JSON.parse(calls[1][1].body),{resolution_id:id,decision:"reopen"});
+ assert.ok(calls.every(([u,o])=>u.endsWith("/guest/cases/"+id+"/resolution")&&o.headers["X-Receipt-Token"]===token&&!u.includes(token)));
+ await assert.rejects(guestApi(async()=>ok({...snapshot,guest_confirmed:true})).resolution(active));
+ await assert.rejects(guestApi(async()=>ok({resolution_id:id,decision:"reopen",duplicate:false,current_case_status:"resolved"})).decideResolution(active,id,"reopen"));
+});
