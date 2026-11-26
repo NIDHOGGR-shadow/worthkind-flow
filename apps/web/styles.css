@@ -429,3 +429,26 @@ fieldset:disabled{opacity:.72}
 .guest-v1-page .hero-side .service-grid button strong{color:#20201e}
 .guest-v1-page .hero-side .service-grid button span:not(.service-arrow){color:#66635e}
 .guest-v1-page .guest-human .button:hover{background:#e6e2d8;color:#20201e;border-color:#e6e2d8}
+
+/* Communication Hub: focused inbox, real server-backed request detail. */
+.communication-inbox{display:grid;grid-template-columns:minmax(210px,0.8fr) minmax(0,1.45fr);gap:16px;align-items:start;margin-top:20px}
+.communication-list{display:grid;gap:4px;padding:6px;min-width:0;background:#f4f3ef;border:1px solid #e3e0d8;border-radius:10px}
+.communication-entry{display:flex;flex-direction:column;gap:6px;text-align:left;padding:14px 12px;min-height:88px;background:transparent;border:1px solid transparent;border-radius:7px;cursor:pointer;color:#20201e;min-width:0}
+.communication-entry:hover{background:#fff}
+.communication-entry[aria-pressed=true]{background:#fff;border-color:#d1cec5;box-shadow:inset 3px 0 #242421}
+.communication-entry strong,.communication-entry span{overflow-wrap:anywhere}
+.communication-preview{font-size:13px;color:#57554e;line-height:1.4}
+.communication-detail{min-width:0}
+.communication-thread{margin:0!important;border:1px solid #e3e0d8!important;border-radius:10px;padding:20px!important;background:#fff}
+.communication-thread>h3{font-size:22px!important;letter-spacing:-.025em}
+.communication-message,.guest-request-reply{background:#f5f4f0;border-radius:9px;padding:16px;margin:16px 0;overflow-wrap:anywhere}
+.communication-message p:last-child,.guest-request-reply p:last-child{white-space:pre-wrap;margin-bottom:0}
+.communication-message .communication-author{font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:#5e5b54;font-weight:650;margin-top:0}
+.communication-message.staff-reply{background:#eeefeb}
+.communication-tools{border-top:1px solid #dedbd4;margin-top:24px;padding-top:14px}
+.communication-tools>summary{min-height:44px;cursor:pointer;font-size:16px;font-weight:650}
+#ai-studio-result:empty{display:none}
+#ai-studio-result{font-size:13px;margin:0 0 12px;color:#454545}
+.communication-human-action{display:flex;gap:16px;flex-wrap:wrap;align-items:center;margin:16px 0 24px}
+.communication-human-action a{min-height:44px;display:inline-flex;align-items:center}
+@media(max-width:900px){.communication-inbox{grid-template-columns:minmax(0,1fr);gap:12px}.communication-list{max-height:300px;overflow-y:auto}.communication-entry{min-height:74px}.communication-thread{padding:15px!important}}
