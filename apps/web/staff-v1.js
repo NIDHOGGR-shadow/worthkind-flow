@@ -43,6 +43,7 @@
     say("login-status",message);controls();
   }
   function showView(value){
+    if(view!==value&&!ctx.busy)say("staff-message","");
     view=value;
     el("staff-module-select").value=value;
     document.querySelectorAll("[data-panel]").forEach(n=>{n.hidden=n.id!==value+"-view";});
@@ -131,7 +132,7 @@
     if(ctx.busy||authBusy)return false;
     if(!ctx.slug){say("staff-message","Select a hotel code first.");return false;}
     const stamp=ctx.stamp();say("staff-message",loading);
-    try{const task=ctx.run(op);controls();const data=await task;if(!ctx.isCurrent(stamp)||!session.signedIn)return false;apply(data);return true;}
+    try{const task=ctx.run(op);controls();const data=await task;if(!ctx.isCurrent(stamp)||!session.signedIn)return false;apply(data);if(el("staff-message").textContent===loading)say("staff-message","");return true;}
     catch(e){if(!ctx.isCurrent(stamp))return false;if(e.status===401){localExit("Session expired or rejected. Sign in again.");return false;}if(e.status===403){commerce.clear();management.clear();native.clear();evidence.clear();documents.clear();aiStudio.clear();roster=null;rooms=null;renderSchedule();renderRooms();cases=null;tickets=null;settings=null;renderCases();renderTickets();el("settings-form").hidden=true;say("case-summary","Access must be verified again.");say("membership-result","");}say("staff-message",e.message);return false;}
     finally{controls();}
   }
@@ -195,7 +196,7 @@
     const slug=el("staff-slug").value.trim();
     if(!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)||slug.length>100)return;
     if((pendingTicket||commerce.pending||management.pending||native.pending||evidence.pending||documents.pending||aiStudio.pending)&&!confirm("An unconfirmed ticket, dining order, stock operation, room hold, provider command or document upload may already exist. Switching property discards its local retry key. Continue?"))return;
-    ctx.select(slug);clearData();say("property-label","Selected: "+slug+" · Access checked by each server request.");say("staff-message","Select a module and load its authorized records.");controls();
+    ctx.select(slug);clearData();say("property-label","Selected: "+slug+" · Access checked by each server request.");say("staff-message","");controls();
   });
   el("load-cases").addEventListener("click",loadCases);el("case-filter").addEventListener("change",renderCases);
   el("load-tickets").addEventListener("click",loadTickets);el("ticket-filter").addEventListener("change",renderTickets);el("ticket-status-filter").addEventListener("change",renderTickets);
