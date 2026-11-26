@@ -106,3 +106,18 @@ test("ticket history is identity-bound and never accepts another record's respon
  await assert.rejects(staffApi(async()=>ok({id:"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",status:"open",history}),identity).ticketDetail("hotel-a",id));
  await assert.rejects(staffApi(async()=>ok({id,status:"open",history:[{action:"note",note:{},created_at:"2026-11-25"}]}),identity).ticketDetail("hotel-a",id));
 });
+
+test("staff hotel discovery uses authenticated global read, preserves invited state and rejects malformed cursor",async()=>{
+ const calls=[];const property={id,slug:"hotel-a",display_name:"Hotel A",time_zone:"Africa/Lagos",role:"manager",membership_state:"invited"};
+ const api=staffApi(async(url,o)=>{calls.push([url,o]);return ok({properties:[property],next_cursor:"hotel-a"});},identity);
+ assert.equal((await api.properties()).properties[0].membership_state,"invited");
+ assert.equal(calls[0][0],"/api/v1/staff/properties?limit=50");
+ assert.equal(calls[0][1].headers.Authorization,"Bearer verified.test.token");
+ await assert.rejects(api.properties("../other"));assert.equal(calls.length,1);
+ await assert.rejects(staffApi(async()=>ok({properties:[{...property,membership_state:"revoked"}],next_cursor:null}),identity).properties());
+});
+test("staff resolution read rejects contradictory guest confirmation",async()=>{
+ const snapshot={case_id:id,case_status:"resolved",resolution_id:id,guest_decision:"confirm",guest_confirmed:true,awaiting_guest_confirmation:false};
+ assert.equal((await staffApi(async()=>ok(snapshot),identity).resolution("hotel-a",id)).guest_confirmed,true);
+ await assert.rejects(staffApi(async()=>ok({...snapshot,awaiting_guest_confirmation:true}),identity).resolution("hotel-a",id));
+});
