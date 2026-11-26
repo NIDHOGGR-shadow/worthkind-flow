@@ -93,6 +93,26 @@ def check_staff_v1(browser, base):
                 assert request.post_data_json["staff_assist"] is True
                 state["ai_policy"] = {**request.post_data_json,"revision":2}
             route.fulfill(json=state.get("ai_policy",{"revision":1,"guest_chat":False,"staff_assist":False,"autonomous_alerts":False,"voice_enabled":False,"max_calls_per_day":20}))
+        elif path == prefix + "/ai/sources":
+            route.fulfill(json={"sources":[{"id":CASE_ID,"content_key":"hotel","title":"Synthetic approved source","version":1,"state":"published","ai_allowed":True}]})
+        elif path == prefix + "/ai/usage":
+            route.fulfill(json={"window_hours":24,"used_units":3,"channels":[{"channel":"guest_chat","state":"answered","calls":2,"units":3}]})
+        elif path == prefix + "/ai/insights":
+            route.fulfill(json={"ticket_counts":[{"category":"maintenance","open_count":2,"overdue_count":1}],"alerts":[{"id":CASE_ID,"ticket_id":TICKET_ID,"category":"maintenance","priority":"high","due_at":"2026-11-26T00:00:00Z","state":state.get("alert","open")}]})
+        elif path == prefix + "/ai/alerts/" + CASE_ID + "/acknowledge":
+            state["alert"]="acknowledged"
+            route.fulfill(json={"acknowledged":True})
+        elif path == prefix + "/ai/ticket-proposals":
+            if request.method == "POST":
+                assert request.post_data_json["subject"] == "Synthetic proposal"
+                state["proposal"]="pending"
+                route.fulfill(status=201,json={"id":CASE_ID,"approval_required":True})
+            else:
+                route.fulfill(json={"proposals":[{"id":CASE_ID,"category":"maintenance","priority":"normal","state":state["proposal"],"subject":"Synthetic proposal","description":"Synthetic proposal description","expires_at":"2026-12-01T00:00:00Z","ticket_id":TICKET_ID if state["proposal"]=="executed" else None}] if "proposal" in state else []})
+        elif path == prefix + "/ai/ticket-proposals/" + CASE_ID + "/decision":
+            assert request.post_data_json == {"approve":True}
+            state["proposal"]="executed"
+            route.fulfill(json={"id":CASE_ID,"state":"executed","ticket_id":TICKET_ID})
         elif path == prefix + "/ai/chat":
             assert request.post_data_json["consent_to_model_processing"] is True
             route.fulfill(json={"status":"answered","answer":"Synthetic approved hotel information","answer_type":"approved_content_excerpt","sources":[{"id":CASE_ID,"key":"hotel","title":"Synthetic source","version":1}],"action_executed":False})
@@ -378,6 +398,21 @@ def check_staff_v1(browser, base):
     page.locator("#ai-staff-consent").check()
     page.get_by_role("button", name="Ask assistant", exact=True).click()
     expect(page.locator("#ai-staff-answer")).to_contain_text("Synthetic approved hotel information")
+    page.locator("#ai-sources-load").click()
+    expect(page.locator("#ai-source-list")).to_contain_text("Retrieval allowed")
+    page.locator("#ai-usage-load").click()
+    expect(page.locator("#ai-usage-list")).to_contain_text("Used units: 3")
+    page.locator("#ai-insights-load").click()
+    expect(page.locator("#ai-insights-list")).to_contain_text("1 overdue")
+    page.get_by_role("button",name="Acknowledge alert").click()
+    expect(page.locator("#ai-insights-list")).to_contain_text("acknowledged")
+    page.locator("#ai-proposal-category").select_option("maintenance")
+    page.locator("#ai-proposal-subject").fill("Synthetic proposal")
+    page.locator("#ai-proposal-description").fill("Synthetic proposal description")
+    page.locator("#ai-proposal-submit").click()
+    expect(page.locator("#ai-proposals-list")).to_contain_text("pending")
+    page.get_by_role("button",name="Approve proposal and create ticket").click()
+    expect(page.locator("#ai-proposals-list")).to_contain_text("Created ticket")
     select_module("Documents")
     page.locator("#document-file").set_input_files({"name":"fixture.bin","mimeType":"application/octet-stream","buffer":b"fixture bytes"})
     page.locator("#document-upload-submit").click()
