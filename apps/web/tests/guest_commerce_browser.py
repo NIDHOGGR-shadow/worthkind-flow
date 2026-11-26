@@ -1,3 +1,5 @@
+import io
+import wave
 """Guest commerce Chromium contract test; network responses are synthetic fixtures."""
 from urllib.parse import urlsplit
 from playwright.sync_api import expect
@@ -21,9 +23,15 @@ def check_guest_commerce(browser, base):
         assert req.headers.get("authorization") is None
         if path == prefix + "/content":
             route.fulfill(json={"content":[{"key":"hotel","version":1,"content":{"title":"Synthetic hotel","body":"Approved fixture content"}},{"key":"privacy-policy","version":1,"content":{"title":"Synthetic privacy policy","body":"Fixture policy for consent tests only."}}]})
+        elif path == prefix + "/ai/voice":
+            assert req.headers.get("x-voice-consent") == "true"
+            assert req.headers.get("content-type") == "audio/wav"
+            assert req.headers.get("authorization") is None
+            assert req.post_data_buffer[:4] == b"RIFF"
+            route.fulfill(json={"status":"handoff","reason":"voice_unavailable","answer":None,"sources":[],"action_executed":False,"human_handoff_required":True})
         elif path == prefix + "/ai/chat":
             assert req.post_data_json["consent_to_model_processing"] is True
-            route.fulfill(json={"status":"handoff","reason":"model_unavailable","answer":None,"sources":[],"action_executed":False,"human_contact_available_via_property":True})
+            route.fulfill(json={"status":"handoff","reason":"model_unavailable","answer":None,"sources":[],"action_executed":False,"human_handoff_required":True})
         elif path == prefix + "/rooms":
             route.fulfill(json={"rooms":[{"id":ROOM,"name":"Synthetic deluxe","max_guests":2,"description":"Fixture room","display_rates":[{"amount_minor":5000000,"currency":"NGN","start_date":"2026-12-01","end_date":"2026-12-31"}]}]})
         elif path == prefix + "/menu":
@@ -159,5 +167,17 @@ def check_guest_commerce(browser, base):
     page.locator("#guest-ai-submit").click()
     expect(page.locator("#guest-ai-answer")).to_contain_text("Contact hotel staff")
     expect(page.locator("#guest-ai-answer")).to_contain_text("did not send a message")
+    audio = io.BytesIO()
+    with wave.open(audio, "wb") as sample:
+        sample.setnchannels(1)
+        sample.setsampwidth(2)
+        sample.setframerate(16000)
+        sample.writeframes(bytes(3200))
+    page.locator("#voice-hotel").fill("hotel-a")
+    page.locator("#voice-file").set_input_files({"name":"fixture.wav","mimeType":"audio/wav","buffer":audio.getvalue()})
+    page.locator("#voice-consent").check()
+    page.locator("#voice-send").click()
+    expect(page.locator("#voice-answer")).to_contain_text("Contact hotel staff")
+    expect(page.locator("#voice-consent")).not_to_be_checked()
     page.close()
     print("PASS: guest commerce catalog, receipt-scoped stay retry, withdrawal, venue request, preferences, feedback, application, and six viewport checks")
