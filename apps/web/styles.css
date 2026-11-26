@@ -345,3 +345,77 @@ fieldset:disabled{opacity:.72}
 .guest-v1-page #guest-voice .actions{flex-wrap:wrap}
 @media(max-width:767px){.guest-service-index{grid-template-columns:repeat(2,minmax(0,1fr));gap:0}.guest-service-index a{padding:12px 8px;border-bottom:1px solid #ededed;min-height:70px}.guest-v1-page .guest-page>.panel{padding:18px}.guest-v1-page .guest-hero h1{font-size:38px}.receipt-nav{display:grid;grid-template-columns:1fr;gap:0}}
 @media(max-width:360px){.guest-v1-page .guest-hero h1{font-size:32px}.guest-v1-page .guest-page>.panel{padding:14px}.guest-service-index a{font-size:13px}}
+
+/* Hospitality polish: focused guest journeys and a denser operational shell. */
+.guest-v1-page{background:#f8f7f4;color:#20201e}
+.flow-brand-mark{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:10px;background:#232321;color:#fff;font-family:Georgia,serif;font-size:24px;font-style:italic;font-weight:400;letter-spacing:-.09em;vertical-align:middle;margin-right:5px}
+.guest-v1-page .guest-header{padding:18px 0;gap:18px;border-color:#dedbd4}
+.guest-v1-page .guest-nav{gap:6px 22px}
+.guest-v1-page .guest-nav a[aria-current=page]{font-weight:750;text-decoration:underline;text-underline-offset:6px}
+.guest-v1-page .guest-page{max-width:1200px;min-height:calc(100svh - 180px)}
+.guest-v1-page .guest-hero{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:clamp(24px,6vw,80px);padding:clamp(26px,5vw,68px) 0 30px}
+.guest-v1-page .guest-hero>div:first-child{border-radius:16px;padding:clamp(26px,4vw,52px);background:#242421;color:#fff;min-width:0}
+.guest-v1-page .guest-hero>div:first-child .eyebrow{color:#d8d5ce;letter-spacing:.14em}
+.guest-v1-page .guest-hero h1{font-family:Georgia,"Times New Roman",serif;font-weight:400;font-size:clamp(42px,5.8vw,76px);letter-spacing:-.055em;line-height:.99;margin:22px 0}
+.guest-v1-page .guest-hero>div:first-child>p{color:#e0ddd6;font-size:16px;line-height:1.6;max-width:38ch}
+.guest-v1-page .guest-human{background:transparent;border:0;border-top:1px solid #62615a;border-radius:0;padding:24px 0 0;margin-top:30px;color:#fff}
+.guest-v1-page .guest-human h2{font-family:Georgia,serif;font-size:26px;font-weight:400}
+.guest-v1-page .guest-human p{color:#e0ddd6;font-size:14px;max-width:38ch}
+.guest-v1-page .guest-human .button{background:#f6f4ed;color:#20201e;border-color:#f6f4ed;padding:12px 20px}
+.guest-v1-page .guest-human .button:focus-visible{outline-color:#fff}
+.guest-v1-page .hero-side{padding:20px 0}
+.guest-v1-page .hero-side .tag{font-family:Georgia,serif;font-weight:400;font-size:clamp(25px,3vw,34px);line-height:1.2;margin:10px 0 24px}
+.guest-v1-page .hero-side .service-grid{border-color:#d7d4cc}
+.guest-v1-page .hero-side .service-grid button{background:transparent;border-color:#d7d4cc;min-height:82px;padding:16px 4px}
+.guest-v1-page .hero-side .service-grid button:hover{background:#eeece6}
+.guest-v1-page .hero-side .service-grid strong{font-size:16px}
+.guest-v1-page .guest-service-index{border-color:#d7d4cc;margin-bottom:18px}
+.guest-v1-page .guest-service-index a{min-height:84px;border-radius:4px}
+.guest-v1-page .guest-service-index a:hover{background:#eeece6}
+.guest-v1-page .guest-home-notice{border:0;background:transparent;color:#66635e;padding:10px 0;font-size:13px}
+.guest-v1-page .guest-page>.panel{max-width:900px;margin:32px auto 48px;border-color:#dedbd4;border-radius:14px;padding:clamp(22px,4vw,44px)}
+.guest-v1-page .guest-page>.panel>h2{font-family:Georgia,serif;font-weight:400;font-size:clamp(32px,4vw,44px);letter-spacing:-.045em}
+.guest-v1-page .guest-page>.panel>form{max-width:none}
+.guest-v1-page input,.guest-v1-page select,.guest-v1-page textarea{border-color:#cecbc4;background:#fff;border-radius:8px}
+.guest-v1-page .button{min-height:48px;border-radius:8px}
+.guest-v1-page .form-help{color:#6c6861}
+.guest-journey-bar{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:16px 0;border-bottom:1px solid #dedbd4}
+.guest-journey-bar>div{display:grid;min-width:0;gap:3px}
+.guest-journey-bar strong{overflow-wrap:anywhere;font-size:15px}
+.guest-journey-bar nav{display:flex;flex-wrap:wrap;gap:6px 20px}
+.guest-journey-bar nav a{color:#20201e;min-height:40px;display:inline-flex;align-items:center;text-decoration:none;font-size:14px}
+.guest-journey-bar nav a[aria-current=page]{font-weight:750;text-decoration:underline;text-underline-offset:5px}
+.guest-page[data-guest-view]:not([data-guest-view=home])>.guest-hero,.guest-page[data-guest-view]:not([data-guest-view=home])>.guest-service-index,.guest-page[data-guest-view]:not([data-guest-view=home])>.guest-home-notice{display:none}
+.guest-page[data-guest-view=home]>.panel,
+.guest-page[data-guest-view=hotel-catalog]>.panel:not(#hotel-catalog),
+.guest-page[data-guest-view=request]>.panel:not(#request),
+.guest-page[data-guest-view=recover]>.panel:not(#recover),
+.guest-page[data-guest-view=v1-track]>.panel:not(#v1-track),
+.guest-page[data-guest-view=guest-commerce]>.panel:not(#guest-commerce),
+.guest-page[data-guest-view=native-guest]>.panel:not(#native-guest),
+.guest-page[data-guest-view=guest-records]>.panel:not(#guest-records),
+.guest-page[data-guest-view=guest-careers]>.panel:not(#guest-careers),
+.guest-page[data-guest-view=guest-ai]>.panel:not(#guest-ai),
+.guest-page[data-guest-view=guest-voice]>.panel:not(#guest-voice){display:none!important}
+.staff-v1-page{background:#f7f7f5}
+.staff-v1-page .staff-workspace{padding-top:20px}
+.staff-v1-page .workspace-heading{margin-bottom:8px}
+.staff-v1-page .workspace-heading h1{font-size:clamp(25px,3vw,34px);margin:3px 0}
+.staff-v1-page .workspace-heading p{font-size:13px;margin:4px 0;color:#606060}
+.staff-v1-page .staff-context{padding:10px 0 16px;grid-template-columns:minmax(0,300px) minmax(110px,150px)}
+.staff-v1-page .staff-module-layout{grid-template-columns:minmax(180px,214px) minmax(0,1fr);gap:20px;padding-top:16px}
+.staff-v1-page .staff-module-layout .staff-v1-nav{position:sticky;top:12px;max-height:calc(100vh - 24px);overflow-y:auto;border:0;background:#efefec;border-radius:10px;padding:14px 10px;gap:10px;scrollbar-width:thin}
+.staff-v1-page .staff-v1-nav button{min-height:40px;padding:8px 12px;border-radius:6px}
+.staff-v1-page .staff-v1-nav button[aria-pressed=true]{background:#242421;color:#fff;box-shadow:none}
+.staff-v1-page .staff-v1-nav button[aria-pressed=true]:focus-visible{outline-color:#242421}
+.staff-v1-page #staff-workspace .staff-module-body>[data-panel]{margin:0 0 32px;background:#fff;border:1px solid #e1e1dd;border-radius:12px;padding:clamp(20px,3vw,32px)}
+.staff-v1-page #staff-message:empty{display:none}
+.staff-v1-page #staff-message{font-size:13px;padding:9px 12px;margin-bottom:12px}
+.staff-v1-page .staff-records{margin-top:20px}
+.staff-v1-page .staff-record h3{font-size:17px}
+.staff-v1-page .staff-record .staff-meta{font-size:12px}
+.staff-v1-page .staff-login{background:#fff;border-color:#e1e1dd;border-radius:14px}
+.staff-v1-page .staff-login h1{font-family:Georgia,serif;font-weight:400;font-size:40px}
+@media(max-width:1023px){.staff-v1-page .staff-module-layout{grid-template-columns:minmax(0,1fr);gap:12px}.staff-v1-page .staff-mobile-modules{background:#efefec;border:0;border-radius:8px;padding:12px}.staff-v1-page .staff-context{grid-template-columns:minmax(0,1fr) minmax(110px,140px)}}
+@media(max-width:767px){.guest-v1-page .guest-header{padding:12px 0;gap:8px}.guest-v1-page .guest-nav{gap:4px 16px;justify-content:space-between;width:100%}.guest-v1-page .guest-hero{grid-template-columns:minmax(0,1fr);padding:18px 0 20px;gap:12px}.guest-v1-page .guest-hero>div:first-child{padding:26px}.guest-v1-page .guest-hero h1{font-size:clamp(40px,10vw,55px);margin:16px 0}.guest-v1-page .guest-human{margin-top:22px;padding-top:20px}.guest-v1-page .hero-side{padding:14px 0}.guest-v1-page .hero-side .service-grid button{min-height:68px}.guest-v1-page .guest-page>.panel{margin:18px 0 30px;padding:20px}.guest-journey-bar{display:grid;gap:8px}.guest-journey-bar nav{gap:4px 14px}.guest-journey-bar nav a{font-size:13px}.staff-v1-page .staff-context{grid-template-columns:minmax(0,1fr)}.staff-v1-page #staff-workspace .staff-module-body>[data-panel]{padding:16px}}
+@media(max-width:360px){.guest-v1-page .guest-hero>div:first-child{padding:22px}.guest-v1-page .guest-header .brand{font-size:18px}.guest-v1-page .guest-nav{gap:4px 8px}.guest-v1-page .guest-page>.panel{padding:15px}.staff-v1-page #staff-workspace .staff-module-body>[data-panel]{padding:13px}}
