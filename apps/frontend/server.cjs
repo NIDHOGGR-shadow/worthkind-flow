@@ -13,6 +13,7 @@ const UUID="[0-9a-fA-F-]{36}";
 const allowed=[
  ["POST","/staff/documents"],["GET","/staff/documents/"+UUID],["GET","/staff/ai/policy"],["PUT","/staff/ai/policy"],["PUT","/staff/ai/sources/"+UUID],["POST","/staff/ai/chat"],["POST","/ai/chat"],["POST","/ai/voice"],["GET","/staff/ai/sources"],["GET","/staff/ai/usage"],["GET","/staff/ai/insights"],["POST","/staff/ai/alerts/"+UUID+"/acknowledge"],["GET","/staff/ai/ticket-proposals"],["POST","/staff/ai/ticket-proposals"],["POST","/staff/ai/ticket-proposals/"+UUID+"/decision"],
  ["GET","/enquiries/"+UUID],["POST","/enquiries"],
+ ["GET","/staff/cases/"+UUID+"/resolution"],["GET","/guest/cases/"+UUID+"/resolution"],["POST","/guest/cases/"+UUID+"/resolution"],
  ["GET","/staff/cases"],["POST","/staff/cases/"+UUID+"/(?:claim|respond|control)"],
  ["GET","/staff/tickets"],["POST","/staff/tickets"],["GET","/staff/tickets/"+UUID],["POST","/staff/tickets/"+UUID+"/transition"],
  ["GET","/staff/settings"],["PUT","/staff/settings"],["POST","/staff/memberships/(?:invite|accept|revoke)"],
@@ -69,7 +70,7 @@ function handler({upstream,identity,documentsEnabled=false},fetcher=fetch){
      const file=ASSETS.get(url.pathname);
      if(file){try{const body=await readFile(path.join(WEB,file));const type=file.endsWith(".html")?"text/html":file.endsWith(".css")?"text/css":"text/javascript";res.writeHead(200,{...base,"Content-Type":type+"; charset=utf-8","Content-Length":body.length});res.end(method==="HEAD"?undefined:body);}catch{json(res,503,{detail:"Frontend asset unavailable"},base);}return;}
    }
-   if(!allowed.some(([m,re])=>m===method&&re.test(url.pathname))){json(res,404,{detail:"Not found"},base);return;}
+   if(!(method==="GET"&&url.pathname==="/api/v1/staff/properties")&&!allowed.some(([m,re])=>m===method&&re.test(url.pathname))){json(res,404,{detail:"Not found"},base);return;}
    const voice=method==="POST"&&/\/ai\/voice$/.test(url.pathname);
    const upload=method==="POST"&&/\/staff\/documents$/.test(url.pathname);
    const download=method==="GET"&&new RegExp("/staff/documents/"+UUID+"$").test(url.pathname);
