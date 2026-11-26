@@ -1,5 +1,7 @@
 import io
 import wave
+import os
+from pathlib import Path
 """Guest commerce Chromium contract test; network responses are synthetic fixtures."""
 from urllib.parse import urlsplit
 from playwright.sync_api import expect
@@ -90,6 +92,17 @@ def check_guest_commerce(browser, base):
 
     page.route("**/api/v1/properties/**", api)
     page.goto(base + "/static/guest-v1.html")
+    page.keyboard.press("Tab")
+    expect(page.locator(".skip-link")).to_be_focused()
+    for target in page.locator(".guest-service-index a").evaluate_all("(links) => links.map(a => a.getAttribute('href'))"):
+        assert page.locator(target).count() == 1
+    if os.getenv("WF_BROWSER_SCREENSHOT_DIR"):
+        output = Path(os.environ["WF_BROWSER_SCREENSHOT_DIR"])
+        output.mkdir(parents=True, exist_ok=True)
+        for width in (390, 1440):
+            page.set_viewport_size({"width":width,"height":900})
+            page.screenshot(path=str(output / f"guest-home-{width}.png"),full_page=True)
+        page.set_viewport_size({"width":390,"height":900})
     page.locator("#catalog-slug").fill("hotel-a")
     page.get_by_role("button", name="Load hotel", exact=True).click()
     expect(page.locator("#catalog-content")).to_contain_text("Synthetic deluxe")
@@ -152,6 +165,8 @@ def check_guest_commerce(browser, base):
         page.set_viewport_size({"width":width,"height":900})
         actual = page.evaluate("Math.max(document.documentElement.scrollWidth, document.body.scrollWidth)")
         assert actual <= width + 2, f"Guest commerce overflow at {width}px ({actual}px)"
+        if width in (390,1440) and os.getenv("WF_BROWSER_SCREENSHOT_DIR"):
+            page.screenshot(path=str(output / f"guest-active-{width}.png"),full_page=True)
     page.locator("#v1-new").click()
     expect(page.locator("#guest-commerce")).to_be_hidden()
     expect(page.locator("#v1-receipt")).to_be_empty()
