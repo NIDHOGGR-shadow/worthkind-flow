@@ -29,8 +29,26 @@ class HandoverDecision(BaseModel):
     action:Literal["acknowledge","cancel"]
 
 
+class AttendanceAction(BaseModel):
+    action:Literal["check_in","check_out"]
+
+
 def install_staff_operations(app):
     base="/api/v1/properties/{slug}/staff"
+    @app.post(base+"/shifts/{shift_id}/attendance")
+    def record_attendance(slug:str,shift_id:UUID,body:AttendanceAction,authorization:str|None=Header(None)):
+        return command("SELECT worthkind_flow.record_staff_attendance(%s,%s,%s,%s)",
+                       (actor(authorization),slug,shift_id,body.action))[0]
+
+    @app.get(base+"/attendance")
+    def attendance(slug:str,start:AwareDatetime,end:AwareDatetime,after:UUID|None=None,limit:int=Query(50,ge=1,le=100),authorization:str|None=Header(None)):
+        rows=command("SELECT * FROM worthkind_flow.list_staff_attendance(%s,%s,%s,%s,%s,%s)",
+                     (actor(authorization),slug,start,end,after,limit+1),many=True)
+        return {"attendance":[{"shift_id":str(r[0]),"membership_id":str(r[1]),"starts_at":r[2].isoformat(),
+                "ends_at":r[3].isoformat(),"checked_in_at":r[4].isoformat() if r[4] else None,
+                "checked_out_at":r[5].isoformat() if r[5] else None} for r in rows[:limit]],
+                "next_cursor":str(rows[limit-1][0]) if len(rows)>limit else None}
+
     @app.get(base+"/handover-recipients")
     def recipients(slug:str,after:UUID|None=None,limit:int=Query(50,ge=1,le=100),authorization:str|None=Header(None)):
         rows=command("SELECT * FROM worthkind_flow.handover_recipients(%s,%s,%s,%s)",(actor(authorization),slug,after,limit+1),many=True)
