@@ -45,11 +45,24 @@ def check_guest_commerce(browser, base):
         elif path == prefix + "/enquiries" and req.method == "POST":
             state["token"] = req.post_data_json["receipt_token"]
             state["kind"] = req.post_data_json["kind"]
+            state["case_status"] = "queued"
+            state["decision"] = None
             route.fulfill(json={"case_id":CASE,"receipt_token":state["token"],"status":"queued","kind":state["kind"]})
+        elif path == prefix + "/enquiries/" + CASE:
+            assert req.headers.get("x-receipt-token") == state["token"]
+            route.fulfill(json={"case_id":CASE,"status":state["case_status"],"kind":state["kind"],"staff_reply":"Fixture staff response"})
         elif path.startswith(private):
             assert req.headers.get("x-receipt-token") == state["token"]
             assert state["token"] not in req.url
-            if path == private + "/preferences":
+            if path == private + "/resolution":
+                if req.method == "POST":
+                    assert req.post_data_json["resolution_id"] == INTENT
+                    state["decision"] = req.post_data_json["decision"]
+                    state["case_status"] = "queued" if state["decision"] == "reopen" else "resolved"
+                    route.fulfill(json={"resolution_id":INTENT,"decision":state["decision"],"duplicate":False,"current_case_status":state["case_status"]})
+                else:
+                    route.fulfill(json={"case_id":CASE,"case_status":state["case_status"],"resolution_id":INTENT,"guest_decision":state["decision"],"guest_confirmed":state["decision"]=="confirm","awaiting_guest_confirmation":state["case_status"]=="resolved" and state["decision"] is None})
+            elif path == private + "/preferences":
                 if req.method == "PUT":
                     assert req.post_data_json["revision"] == 0
                     assert req.post_data_json["language"] == "English"
@@ -122,6 +135,22 @@ def check_guest_commerce(browser, base):
     page.locator("#v1-submit").click()
     expect(page.locator("#v1-track")).to_be_visible()
     expect(page.locator("#track-heading")).to_be_focused()
+    state["case_status"] = "resolved"
+    page.locator("#v1-refresh").click()
+    expect(page.locator("#guest-resolution")).to_be_visible()
+    page.locator("#resolution-load").click()
+    expect(page.locator("#resolution-confirm")).to_be_visible()
+    page.locator("#resolution-reopen").click()
+    expect(page.locator("#guest-resolution-status")).to_contain_text("You reopened")
+    expect(page.locator("#v1-case-status")).to_contain_text("waiting for staff")
+    state["case_status"] = "resolved"
+    state["decision"] = None
+    page.locator("#v1-refresh").click()
+    page.locator("#resolution-load").click()
+    page.locator("#resolution-confirm").click()
+    expect(page.locator("#v1-case-status")).to_have_text("Resolved and confirmed by you.")
+    expect(page.locator("#resolution-confirm")).to_be_hidden()
+
     expect(page.locator("#guest-commerce")).to_be_hidden()
     expect(page.locator("#v1-copy")).to_be_hidden()
     page.locator("#v1-reveal").click()
