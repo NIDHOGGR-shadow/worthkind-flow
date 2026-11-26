@@ -24,7 +24,7 @@ import pytest
 
 MIGRATIONS = [
     Path(__file__).resolve().parents[3] / "db" / "migrations" / name
-    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql", "008_hotel_onboarding_settings.sql", "009_identity_provisioning.sql", "010_guest_quota.sql", "011_private_documents.sql", "012_operational_tickets.sql", "013_content_catalog.sql", "014_rooms_rates.sql", "015_rate_lookup_qualification.sql", "016_inventory_procurement.sql", "017_dining_kitchen.sql", "018_menu_lock_qualification.sql", "019_department_roles.sql", "020_staff_shifts.sql", "021_guest_preferences_feedback.sql", "022_reservation_intents.sql", "023_hotel_finance.sql", "024_events_recruitment.sql", "025_pms_accounts.sql", "026_reception_controls.sql", "027_payment_mode_boundaries.sql", "028_operations_read_contracts.sql", "029_native_booking_inventory.sql", "030_native_booking_changes.sql", "031_pos_receipt_evidence.sql", "032_purchase_batches.sql", "033_partial_refunds.sql", "034_native_stay_invoices.sql", "035_settlement_reconciliation.sql", "036_pms_reservation_evidence.sql", "037_native_stay_operations.sql", "038_pms_commands.sql", "039_provider_sync_guards.sql", "040_pos_refresh_worker.sql", "041_pos_cancellation_guard.sql", "042_pms_readback_recovery.sql", "043_provider_emergency_disable.sql", "044_ai_policy_and_retrieval.sql", "045_ai_automation_and_approvals.sql", "046_ai_retrieval_and_budget_guards.sql", "047_guest_resolution_decisions.sql", "048_staff_property_discovery.sql", "049_reception_handovers.sql", "050_management_reports.sql", "051_guest_department_tracking.sql", "052_staff_attendance.sql", "053_guest_dining_orders.sql", "054_staff_leave.sql", "055_platform_crm.sql", "056_email_notifications.sql")
+    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql", "008_hotel_onboarding_settings.sql", "009_identity_provisioning.sql", "010_guest_quota.sql", "011_private_documents.sql", "012_operational_tickets.sql", "013_content_catalog.sql", "014_rooms_rates.sql", "015_rate_lookup_qualification.sql", "016_inventory_procurement.sql", "017_dining_kitchen.sql", "018_menu_lock_qualification.sql", "019_department_roles.sql", "020_staff_shifts.sql", "021_guest_preferences_feedback.sql", "022_reservation_intents.sql", "023_hotel_finance.sql", "024_events_recruitment.sql", "025_pms_accounts.sql", "026_reception_controls.sql", "027_payment_mode_boundaries.sql", "028_operations_read_contracts.sql", "029_native_booking_inventory.sql", "030_native_booking_changes.sql", "031_pos_receipt_evidence.sql", "032_purchase_batches.sql", "033_partial_refunds.sql", "034_native_stay_invoices.sql", "035_settlement_reconciliation.sql", "036_pms_reservation_evidence.sql", "037_native_stay_operations.sql", "038_pms_commands.sql", "039_provider_sync_guards.sql", "040_pos_refresh_worker.sql", "041_pos_cancellation_guard.sql", "042_pms_readback_recovery.sql", "043_provider_emergency_disable.sql", "044_ai_policy_and_retrieval.sql", "045_ai_automation_and_approvals.sql", "046_ai_retrieval_and_budget_guards.sql", "047_guest_resolution_decisions.sql", "048_staff_property_discovery.sql", "049_reception_handovers.sql", "050_management_reports.sql", "051_guest_department_tracking.sql", "052_staff_attendance.sql", "053_guest_dining_orders.sql", "054_staff_leave.sql", "055_platform_crm.sql", "056_email_notifications.sql", "057_platform_subscription_terms.sql")
 ]
 
 
@@ -1793,3 +1793,47 @@ def test_email_notifications_consent_and_provider_states(pg, seeded):
     with pytest.raises(errors.InsufficientPrivilege):
         with command_session(pg,"wf_guest_api"):
             pg.execute("SELECT * FROM worthkind_flow.email_notifications")
+
+
+def test_platform_subscription_contract_isolation_and_immutable_plan(pg, oidc_rig, monkeypatch):
+    from datetime import datetime,timedelta,timezone
+    client,key,source=oidc_rig
+    monkeypatch.setenv("WF_OPERATIONS_POSTGRES_DSN",os.environ["WF_STAFF_POSTGRES_DSN"])
+    owner=auth_header(signed_token(key,"idp:hotel-a-owner"))
+    path="/api/v1/properties/hotel-a/staff/platform-subscription"
+    assert client.get(path,headers=owner).json()["status"]=="no_current_term"
+    plan_sql="SELECT worthkind_flow.register_platform_plan(%s,%s,%s,%s,%s,%s,%s,%s)"
+    args=("ci-"+uuid4().hex,1,"CI contract only","NGN",10000,200,"CI operator","CI contract evidence")
+    with pg.transaction():
+        pg.execute("SET LOCAL ROLE wf_hotel_provisioner")
+        pid=pg.execute(plan_sql,args).fetchone()[0]
+        assert pg.execute(plan_sql,args).fetchone()[0]==pid
+    with pytest.raises(errors.UniqueViolation):
+        pg.execute(plan_sql,(*args[:4],20000,*args[5:]))
+    now=datetime.now(timezone.utc)
+    term_sql="SELECT worthkind_flow.record_platform_subscription(%s,%s,%s,%s,%s,%s,%s)"
+    term=("hotel-a",pid,uuid4(),now-timedelta(days=1),now+timedelta(days=29),"CI operator","CI signed contract")
+    with pg.transaction():
+        pg.execute("SET LOCAL ROLE wf_hotel_provisioner")
+        tid=pg.execute(term_sql,term).fetchone()[0]
+        assert pg.execute(term_sql,term).fetchone()[0]==tid
+    with pytest.raises(errors.CheckViolation):
+        pg.execute(term_sql,(*term[:2],uuid4(),*term[3:]))
+    with pytest.raises(errors.UniqueViolation):
+        pg.execute(term_sql,(*term[:4],now+timedelta(days=30),*term[5:]))
+    result=client.get(path,headers=owner)
+    assert result.status_code==200,result.text
+    data=result.json()
+    assert data["status"]=="contract_recorded"
+    assert data["term"]["monthly_price_minor"]=="10000"
+    assert data["term"]["included_ai_calls"]==200
+    assert not data["payment_verified"] and not data["usage_allowance_enforced"]
+    for subject in ("idp:hotel-b-reception","idp:hotel-a-reception"):
+        assert client.get(path,headers=auth_header(signed_token(key,subject))).status_code==403
+    with pytest.raises(errors.InsufficientPrivilege):
+        with pg.transaction():
+            pg.execute("SET LOCAL ROLE wf_operations")
+            pg.execute(term_sql,term)
+    with pytest.raises(errors.InsufficientPrivilege):
+        with command_session(pg,"wf_guest_api"):
+            pg.execute("SELECT * FROM worthkind_flow.platform_subscription_terms")

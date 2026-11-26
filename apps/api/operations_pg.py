@@ -73,6 +73,10 @@ def decrypt(value,aad):
 
 
 def install_operations_pg_routes(app):
+    @app.get("/api/v1/properties/{slug}/staff/platform-subscription")
+    def platform_subscription(slug:str,authorization:str|None=Header(None)):
+        return command("SELECT worthkind_flow.read_platform_subscription(%s,%s)",(actor(authorization),slug))[0]
+
     @app.get("/api/v1/properties/{slug}/staff/reports/operations")
     def management_report(slug:str,authorization:str|None=Header(None)):
         return command("SELECT worthkind_flow.management_snapshot(%s,%s)",(actor(authorization),slug))[0]
