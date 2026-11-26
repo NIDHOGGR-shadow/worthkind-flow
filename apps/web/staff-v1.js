@@ -5,7 +5,7 @@
   const node=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=String(text);if(cls)n.className=cls;return n;};
   const ctx=staffContext();
   let roster=null,rooms=null,range=null;
-  let session,api,view="cases",cases=null,tickets=null,settings=null,pendingTicket=null,expiryTimer,authBusy=false;
+  let session,api,view="cases",cases=null,tickets=null,settings=null,selectedCase=null,pendingTicket=null,expiryTimer,authBusy=false;
   const randomKey=()=>Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,"0")).join("");
   const describe=s=>String(s).replaceAll("_"," ");
   const commerce=initStaffCommerce({session:()=>session,ctx,run,mutate});
@@ -17,11 +17,11 @@
   function clearData(){
     commerce.clear();management.clear();native.clear();evidence.clear();documents.clear();aiStudio.clear();
     roster=null;rooms=null;range=null;el("staff-roster").replaceChildren();el("staff-shifts").replaceChildren();el("staff-rooms").replaceChildren();el("staff-profile-form").reset();el("shift-form").reset();el("schedule-range").reset();
-    cases=null;tickets=null;settings=null;el("case-search").value="";el("ticket-search").value="";say("ticket-summary","");el("case-filter").value="";el("ticket-filter").value="";el("ticket-status-filter").value="";
+    cases=null;tickets=null;settings=null;selectedCase=null;el("case-search").value="";el("ticket-search").value="";say("ticket-summary","");el("case-filter").value="";el("ticket-filter").value="";el("ticket-status-filter").value="";
     el("v1-cases").replaceChildren();el("v1-tickets").replaceChildren();
     el("settings-form").hidden=true;say("settings-version","");say("ai-state","");
     el("guest-enabled").checked=false;
-    say("case-summary","Load the server-authorized queue.");say("membership-result","");
+    say("case-summary","Refresh to see guest requests.");say("membership-result","");
     el("membership-form").reset();el("create-ticket").reset();
     pendingTicket=null;el("ticket-discard").hidden=true;
   }
@@ -43,7 +43,7 @@
     say("login-status",message);controls();
   }
   function showView(value){
-    if(view!==value&&!ctx.busy)say("staff-message","");
+    if(view!==value&&!ctx.busy){say("staff-message","");say("ai-studio-result","");}
     view=value;
     el("staff-module-select").value=value;
     document.querySelectorAll("[data-panel]").forEach(n=>{n.hidden=n.id!==value+"-view";});
@@ -57,11 +57,19 @@
     const filtered=cases.cases.filter(c=>(!el("case-filter").value||c.status===el("case-filter").value)&&(!q||[c.customer_name,c.id,c.kind,c.details].some(v=>typeof v==="string"&&v.toLowerCase().includes(q))));
     say("case-summary",filtered.length+" of "+cases.cases.length+" returned cases · Role: "+cases.staff_role+" · Maximum 100 records");
     if(!filtered.length)root.append(node("p","No matching cases.","case-empty"));
-    for(const c of filtered){
-      const card=node("article",undefined,"staff-record");
-      card.append(node("h3",c.customer_name||"Guest enquiry"),node("p",describe(c.kind)+" · "+describe(c.status)+" · "+c.id,"staff-meta"));
+    if(!filtered.length){selectedCase=null;return;}
+    if(!filtered.some(c=>c.id===selectedCase))selectedCase=filtered[0].id;
+    const list=node("div",undefined,"communication-list"),detail=node("div",undefined,"communication-detail");
+    list.setAttribute("aria-label","Guest requests");root.append(list,detail);
+    for(const c of filtered){const entry=node("button",undefined,"communication-entry");entry.type="button";entry.setAttribute("aria-pressed",String(c.id===selectedCase));entry.append(node("strong",c.customer_name||"Guest enquiry"),node("span",describe(c.kind)+" · "+describe(c.status),"staff-meta"),node("span",(c.details||"Guest request").slice(0,100),"communication-preview"));entry.addEventListener("click",()=>{if(ctx.busy)return;selectedCase=c.id;renderCases();const heading=detailHeading();if(heading)heading.focus();});list.append(entry);}
+    function detailHeading(){return root.querySelector(".communication-detail h3");}
+    for(const c of filtered.filter(c=>c.id===selectedCase)){
+      const card=node("article",undefined,"staff-record communication-thread");
+      const heading=node("h3",c.customer_name||"Guest enquiry");heading.tabIndex=-1;card.append(heading,node("p",describe(c.kind)+" · "+describe(c.status),"staff-meta"));
       if(c.contact)card.append(node("p",c.contact,"staff-meta"));
-      card.append(node("p",c.details||"No request details returned."));
+      const message=node("div",undefined,"communication-message");message.append(node("p","Guest request","communication-author"),node("p",c.details||"No request details returned."));card.append(message);
+      if(typeof c.staff_reply==="string"&&c.staff_reply.trim()){const reply=node("div",undefined,"communication-message staff-reply");reply.append(node("p","Latest recorded staff response","communication-author"),node("p",c.staff_reply));card.append(reply);}
+      const ref=node("details"),refTitle=node("summary","Request reference");ref.append(refTitle,node("p",c.id,"staff-meta"));card.append(ref);
       if(c.status==="queued"){const b=node("button","Claim case","button primary");b.type="button";b.addEventListener("click",()=>mutate(()=>api.caseAction(ctx.slug,c.id,"claim"),loadCases,"Case claimed by server."));card.append(b);}
       if(c.status==="claimed"){
         const form=node("form"),label=node("label","Record a response"),field=node("textarea");field.id="reply-"+c.id;label.htmlFor=field.id;field.required=true;field.minLength=2;field.maxLength=3000;field.rows=3;
@@ -83,7 +91,7 @@
           b.addEventListener("click",()=>{const why=reason.value.trim(),to=target?.value.trim();if(why.length<8||(action==="transfer"&&!WF_UUID.test(to))){say("staff-message","Enter a valid reason and transfer membership ID when required.");return;}if(!confirm("Confirm "+action+" for this case? Staff resolution is not guest confirmation."))return;mutate(()=>api.caseControl(ctx.slug,c.id,action,why,to),loadCases,"Case control recorded. No guest confirmation or notification delivery is implied.");});actions.append(b);
         }box.append(actions);card.append(box);
       }
-      root.append(card);
+      detail.append(card);
     }
   }
   function renderTickets(){
@@ -137,7 +145,7 @@
     finally{controls();}
   }
   async function loadCases(){
-    cases=null;renderCases();say("case-summary","No verified queue loaded.");return run(slug=>api.cases(slug),data=>{cases=data;renderCases();say("staff-message","Reception queue loaded from server.");});
+    cases=null;renderCases();say("case-summary","No verified queue loaded.");return run(slug=>api.cases(slug),data=>{cases=data;renderCases();say("staff-message","Guest requests refreshed.");});
   }
   async function loadTickets(){
     tickets=null;renderTickets();return run(slug=>api.tickets(slug),data=>{tickets=data;renderTickets();say("staff-message","Department tickets loaded from server.");});
