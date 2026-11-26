@@ -90,4 +90,11 @@ Do not represent missing API contracts, provider activation or unexecuted tests 
 - [x] Guest service shortcuts, concise service copy, receipt navigation and explicit clipboard action with manual fallback and private-data cleanup.
 - [x] Staff local case/ticket search, matching counts, module announcements and property-scoped filter reset.
 - [x] Static inspection: both versioned entry scripts parse, no duplicate IDs, no missing literal DOM hooks or label targets in either entry page.
-- [ ] New Chromium regression cases and guest screenshot capture committed through 461b9ed82cfc0507003bfcc2b6a32551c2f6f2dd; latest full execution and visual inspection not yet verified. No backend or infrastructure changes made during this refinement.
+- [x] Frontend-only UX regression passed at 461b9ed82cfc0507003bfcc2b6a32551c2f6f2dd in run 45805082859 and follow-up run 45805134579. Reviewed the actual 44 browser screenshots (40 staff and four guest).
+
+## Hospitality visual refinement
+- [x] Identified oversized guest scroll (5,047 px on the initial 390px-wide page; over 11,000 px with a receipt), technical copy and excessive staff header/loading footprint from actual browser renders.
+- [x] Guest editorial landing and focused hash-navigation screens; active receipt navigation remains available without putting its ID or token in the URL. Private views require a verified receipt; history navigation preserves the in-memory context only.
+- [x] Refined desktop sidebar and mobile property switcher; stale previous-module and loading feedback cleared. All 120 staff browser layout checks passed in run 45810301551. That run failed guest keyboard entry; clean initial URL and explicit route readiness correction committed.
+- [x] Partial catalog results now preserve verified hotel/room/menu/venue sections independently, distinguish failed reads from verified emptiness, and direct guests to reception for missing information. Test added.
+- [ ] Expanded guest service route, keyboard, history and screenshot regression on revision dfa91bbc6a0b41d3078f623e07230862b7deba23 (run 45810621793). No production deployment or live provider success claimed. Screenshots use synthetic fixture records.
