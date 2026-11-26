@@ -76,11 +76,18 @@ Q3 status: expanded implementation and prior automated verification complete for
 - [x] AI Studio source permission listing, server-reported usage, internal insights and alert acknowledgment connected to current backend PR #3 contracts. Ticket proposal submission uses retry keys; explicit human approval or rejection uses server decisions, including expired/rejected outcomes and created ticket identity.
 - [x] Guest recorded voice turns: local microphone recording, mono 16 kHz PCM WAV conversion, file selection alternative, explicit processing consent, bounded gateway with credential stripping, approved answer and optional audio playback or human handoff. Recorded voice turns are not live phone calls.
 - [x] Added AI contract tests, browser fixture journeys and loopback voice gateway regression tests; JavaScript contract-test step passed on run 45771793780 before final gateway-test and responsive styling commits.
-- [ ] Final expanded CI result, real device microphone tests, actual Modal model activation, hosted AI/voice acceptance and AI audit completeness. Live telephony, automated CRM campaigns/advertising, platform tenant administration/subscription billing and complete analytics still require backend contracts.
+- [x] CI run 45771894800 passed 95/95 JavaScript tests and 162 responsive browser checks, including the voice gateway and AI approval fixture journeys.
+- [ ] Real device microphone tests, actual Modal model activation, hosted AI/voice acceptance and AI audit completeness. Live telephony, automated CRM campaigns/advertising, platform tenant administration/subscription billing and complete analytics still require backend contracts.
 - [x] Owner/manager document upload and retrieval by exact ID, 2 MB limit, binary-only gateway, attachment-only download, temporary object URL revocation on property/session reset. Default-off gateway flag WF_FRONTEND_DOCUMENTS_ENABLED=1 requires approved document handling policy and storage acceptance. No scan, listing or deletion API is claimed.
 - [ ] Document malware screening, listing/deletion and hosted acceptance; identity recovery/MFA, dedicated shift handover, guest-confirmed resolution and historical vacancy draft listing remain open.
 - [ ] Hosted frontend gateway, approved identity project, property isolation tests, provider activation, live acceptance and integration with backend PR #3. Do not mark a live deployment without verification.
 
-Q4 status: property management, provider integration, AI policy/assistant, internal alerts, explicit approval workflows, recorded voice and private document controls implemented. Expanded AI/voice browser and gateway acceptance remains pending. Full release remains open. PR #2 remains draft; live provider and hosted acceptance are unverified.
+Q4 status: property management, provider integration, AI policy/assistant, internal alerts, explicit approval workflows, recorded voice and private document controls implemented. Expanded AI/voice fixture browser and gateway acceptance passed in run 45771894800. Full release remains open. PR #2 remains draft; live provider and hosted acceptance are unverified.
 
 Do not represent missing API contracts, provider activation or unexecuted tests as finished functionality. The existing development paths are not production identities or hotel connections.
+
+## Frontend-only refinement
+- [x] Guest service shortcuts, concise service copy, receipt navigation and explicit clipboard action with manual fallback and private-data cleanup.
+- [x] Staff local case/ticket search, matching counts, module announcements and property-scoped filter reset.
+- [x] Static inspection: both versioned entry scripts parse, no duplicate IDs, no missing literal DOM hooks or label targets in either entry page.
+- [ ] New Chromium regression cases and guest screenshot capture committed through 461b9ed82cfc0507003bfcc2b6a32551c2f6f2dd; latest full execution and visual inspection not yet verified. No backend or infrastructure changes made during this refinement.
