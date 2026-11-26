@@ -452,3 +452,13 @@ fieldset:disabled{opacity:.72}
 .communication-human-action{display:flex;gap:16px;flex-wrap:wrap;align-items:center;margin:16px 0 24px}
 .communication-human-action a{min-height:44px;display:inline-flex;align-items:center}
 @media(max-width:900px){.communication-inbox{grid-template-columns:minmax(0,1fr);gap:12px}.communication-list{max-height:300px;overflow-y:auto}.communication-entry{min-height:74px}.communication-thread{padding:15px!important}}
+
+.operations-overview-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:14px}
+.operations-overview-grid .staff-record{margin:0;min-width:0;border:1px solid #e3e0d8;border-radius:9px;padding:18px;background:#faf9f6}
+.operations-overview-grid .staff-record h3{font-size:16px;margin:0 0 12px}
+.operations-overview-metric{display:flex;align-items:baseline;gap:12px;margin:12px 0;min-width:0}
+.operations-overview-metric strong{font-size:30px;font-weight:600;font-variant-numeric:tabular-nums;color:#242421}
+.operations-overview-metric span{font-size:13px;color:#55534e;overflow-wrap:anywhere}
+.operations-overview-grid .button{margin-top:10px;min-height:44px}
+.overview-meta{font-size:13px;color:#66635e}
+@media(max-width:767px){.operations-overview-grid{grid-template-columns:minmax(0,1fr);gap:10px}}
