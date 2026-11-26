@@ -92,5 +92,5 @@
     if(!window.confirm("Have you saved the private receipt? Starting over removes it from this page."))return;
     journey.reset();commerce.reset();management.reset();native.reset();el("v1-form").reset();el("v1-recover-form").reset();el("v1-track").hidden=true;el("v1-receipt").hidden=true;el("v1-copy").hidden=true;say("receipt-copy-status","");el("v1-reveal").setAttribute("aria-expanded","false");say("v1-reveal","Show private receipt");say("v1-receipt","");say("v1-reply","");say("v1-case-status","");say("v1-recover-status","");say("v1-submit-status","Ready for a new request.");controls();showView("request",true);el("v1-hotel").focus();
   });
-  controls();showView(location.hash.slice(1),false,"replace");
+  controls();showView(location.hash.slice(1),false,location.hash?"replace":"none");
 })();
