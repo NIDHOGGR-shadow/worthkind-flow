@@ -106,6 +106,7 @@ def check_guest_commerce(browser, base):
             page.screenshot(path=str(output / f"guest-home-{width}.png"),full_page=True)
         page.set_viewport_size({"width":390,"height":900})
     expect(page.locator("#request")).to_be_hidden()
+    assert page.locator(".guest-hero h1").evaluate("(n) => getComputedStyle(n).color") == "rgb(248, 246, 240)"
     page.locator(".guest-service-index a[href='#hotel-catalog']").click()
     expect(page.locator("#hotel-catalog")).to_be_visible()
     expect(page.locator(".guest-hero")).to_be_hidden()
@@ -226,12 +227,14 @@ def check_guest_commerce(browser, base):
     expect(page.locator("#voice-consent")).not_to_be_checked()
     for view in ("home","hotel-catalog","guest-ai","guest-voice","guest-careers","v1-track","guest-commerce","native-guest","guest-records"):
         page.evaluate("(view) => document.dispatchEvent(new CustomEvent('flow:guest-view', {detail:view}))",view)
+        if view == "home":
+            expect(page.get_by_role("button",name="View my request")).to_be_enabled()
         for width in (320,390,768,1440):
             page.set_viewport_size({"width":width,"height":900})
             assert page.evaluate("Math.max(document.documentElement.scrollWidth,document.body.scrollWidth)") <= width+2, f"{view}: overflow at {width}"
             if width in (390,1440) and os.getenv("WF_BROWSER_SCREENSHOT_DIR"):
                 page.locator("body").evaluate("() => { if(document.activeElement) document.activeElement.blur(); window.scrollTo(0,0); }")
-                page.screenshot(path=str(output / f"guest-{view}-{width}.png"),full_page=True)
+                page.screenshot(path=str(output / f"guest-{'home-with-receipt' if view == 'home' else view}-{width}.png"),full_page=True)
     page.go_back()
     expect(page.locator("#home")).to_have_attribute("data-guest-view","native-guest")
     page.go_forward()
