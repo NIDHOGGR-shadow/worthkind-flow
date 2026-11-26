@@ -1,0 +1,131 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    environment:
+      WF_ENV: staging
+      WF_IDENTITY_PROVIDER: supabase
+      WF_SUPABASE_URL: ${WF_SUPABASE_URL:?required}
+      WF_SUPABASE_PUBLISHABLE_KEY: ${WF_SUPABASE_PUBLISHABLE_KEY:?required}
+      WF_ENABLE_PG_GUEST_API: '1'
+      WF_DATA_KEYS_JSON: ${WF_DATA_KEYS_JSON:?required}
+      WF_DATA_ACTIVE_KEY_ID: ${WF_DATA_ACTIVE_KEY_ID:?required}
+      WF_DATA_KEY_B64: ${WF_DATA_KEY_B64:-}
+      WF_GUEST_QUOTA_SECRET: ${WF_GUEST_QUOTA_SECRET:?required}
+      WF_GUEST_POSTGRES_DSN: ${WF_GUEST_POSTGRES_DSN:?required}
+      WF_STAFF_POSTGRES_DSN: ${WF_STAFF_POSTGRES_DSN:?required}
+      WF_STAFF_LIFECYCLE_POSTGRES_DSN: ${WF_STAFF_LIFECYCLE_POSTGRES_DSN:?required}
+      WF_PROPERTY_CONFIG_POSTGRES_DSN: ${WF_PROPERTY_CONFIG_POSTGRES_DSN:?required}
+      WF_GUEST_QUOTA_POSTGRES_DSN: ${WF_GUEST_QUOTA_POSTGRES_DSN:?required}
+      WF_DOCUMENT_POSTGRES_DSN: ${WF_DOCUMENT_POSTGRES_DSN:?required}
+      WF_PLATFORM_CRM_POSTGRES_DSN: ${WF_PLATFORM_CRM_POSTGRES_DSN:-}
+      WF_OPERATIONS_POSTGRES_DSN: ${WF_OPERATIONS_POSTGRES_DSN:?required}
+      WF_PUBLIC_CONTENT_POSTGRES_DSN: ${WF_PUBLIC_CONTENT_POSTGRES_DSN:?required}
+      WF_PAYMENT_PROVIDER_POSTGRES_DSN: ${WF_PAYMENT_PROVIDER_POSTGRES_DSN:-}
+      WF_PAYSTACK_ACCOUNTS_JSON: ${WF_PAYSTACK_ACCOUNTS_JSON:-}
+      WF_PAYSTACK_LIVE_ENABLED: ${WF_PAYSTACK_LIVE_ENABLED:-0}
+      WF_CLOUDBEDS_WRITES_ENABLED: ${WF_CLOUDBEDS_WRITES_ENABLED:-0}
+      WF_CLOUDBEDS_ACCOUNTS_JSON: ${WF_CLOUDBEDS_ACCOUNTS_JSON:-}
+      WF_PMS_PROVIDER_POSTGRES_DSN: ${WF_PMS_PROVIDER_POSTGRES_DSN:-}
+      WF_POS_PROVIDER_POSTGRES_DSN: ${WF_POS_PROVIDER_POSTGRES_DSN:-}
+      WF_LOYVERSE_ACCOUNTS_JSON: ${WF_LOYVERSE_ACCOUNTS_JSON:-}
+      WF_AI_GATEWAY_POSTGRES_DSN: ${WF_AI_GATEWAY_POSTGRES_DSN:-}
+      WF_AI_POLICY_POSTGRES_DSN: ${WF_AI_POLICY_POSTGRES_DSN:-}
+      WF_MODAL_ENABLED: ${WF_MODAL_ENABLED:-0}
+      WF_MODAL_CHAT_URL: ${WF_MODAL_CHAT_URL:-}
+      WF_MODAL_CHAT_MODEL: ${WF_MODAL_CHAT_MODEL:-}
+      WF_MODAL_PROXY_KEY: ${WF_MODAL_PROXY_KEY:-}
+      WF_MODAL_PROXY_SECRET: ${WF_MODAL_PROXY_SECRET:-}
+      WF_MODAL_VOICE_ENABLED: ${WF_MODAL_VOICE_ENABLED:-0}
+      WF_MODAL_ASR_URL: ${WF_MODAL_ASR_URL:-}
+      WF_MODAL_TTS_URL: ${WF_MODAL_TTS_URL:-}
+    ports:
+      - "127.0.0.1:8000:8000"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD","python","-c","import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=30)"]
+      interval: 60s
+      timeout: 35s
+      retries: 3
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    command: ["python","event_projector.py"]
+    environment:
+      WF_EVENT_PROJECTOR_POSTGRES_DSN: ${WF_EVENT_PROJECTOR_POSTGRES_DSN:?required}
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  pos-sync:
+    profiles: ["pos-sync"]
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    command: ["python","pos_sync_worker.py"]
+    environment:
+      WF_POS_SYNC_ENABLED: '1'
+      WF_POS_SYNC_POSTGRES_DSN: ${WF_POS_SYNC_POSTGRES_DSN:-}
+      WF_LOYVERSE_ACCOUNTS_JSON: ${WF_LOYVERSE_ACCOUNTS_JSON:-}
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  ai-automation:
+    profiles: ["ai-automation"]
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    command: ["python","ai_automation_worker.py"]
+    environment:
+      WF_AI_AUTOMATION_ENABLED: '1'
+      WF_AI_AUTOMATION_POSTGRES_DSN: ${WF_AI_AUTOMATION_POSTGRES_DSN:-}
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  email-delivery:
+    profiles: ["email-delivery"]
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    command: ["python","email_delivery_worker.py"]
+    environment:
+      WF_EMAIL_DELIVERY_ENABLED: ${WF_EMAIL_DELIVERY_ENABLED:-0}
+      WF_EMAIL_DELIVERY_POSTGRES_DSN: ${WF_EMAIL_DELIVERY_POSTGRES_DSN:-}
+      WF_RESEND_ACCOUNTS_JSON: ${WF_RESEND_ACCOUNTS_JSON:-}
+      WF_DATA_KEYS_JSON: ${WF_DATA_KEYS_JSON:-}
+      WF_DATA_ACTIVE_KEY_ID: ${WF_DATA_ACTIVE_KEY_ID:-}
+      WF_DATA_KEY_B64: ${WF_DATA_KEY_B64:-}
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped

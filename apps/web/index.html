@@ -4,23 +4,25 @@
 <title>Worthkind Flow — Hotel guest services</title>
 <link rel="stylesheet" href="/static/styles.css"></head>
 <body>
-<header class="shell topbar"><a class="brand" href="/" aria-label="Worthkind Flow home"><span class="mark">W</span> WORTHKIND <strong>FLOW</strong></a><span class="status">REFERENCE · NO LIVE BOOKINGS</span><a class="staff-link" href="/staff">Staff demo</a></header>
-<main class="shell">
-<section class="hero"><div>
-<span class="eyebrow">HOSPITALITY, CONNECTED</span>
-<h1>Hotel help.<br><em>On your terms.</em></h1>
-<p>Ask a question, send an enquiry or request hotel staff directly. AI is optional; every request is routed to the appropriate people.</p>
-<div class="hero-actions"><a class="button primary" href="#new-request">Send an enquiry</a><a class="button secondary" href="#direct-service">Continue without AI</a></div>
-</div><div class="hero-side"><div class="tag">What would you like to do?</div><div class="service-grid" id="services">
-<button data-kind="booking">🛏️ <strong>Room enquiry</strong><span>Dates and preferences</span></button>
-<button data-kind="food">🍽️ <strong>Dining & food</strong><span>Menus and requests</span></button>
-<button data-kind="events">🗓️ <strong>Events</strong><span>Meetings and venues</span></button>
-<button data-kind="careers">💼 <strong>Careers</strong><span>Jobs and internships</span></button>
-<button data-kind="supplier">🤝 <strong>Suppliers</strong><span>Offer your services</span></button>
-<button data-kind="human">☎️ <strong>Human support</strong><span>Talk to a person</span></button>
+<a class="skip-link" href="#new-request">Skip to enquiry</a>
+<header class="shell topbar guest-header"><a class="brand" href="/" aria-label="Worthkind Flow home">worthkind<strong> flow</strong></a><nav class="guest-nav" aria-label="Guest navigation"><a href="#direct-service">Assistance</a><a href="#new-request">New request</a><a href="#recover">Track request</a></nav></header>
+<main class="shell guest-page">
+<section class="guest-context" aria-labelledby="property-name">
+<div><span class="eyebrow">YOUR HOTEL</span><h2 id="property-name">Selected hotel</h2><p id="property-capability" role="status" aria-live="polite">Booking enquiries only. Hotel information has not yet been checked.</p></div>
+<div class="guest-property-control"><label for="hotel">Choose a hotel (development)</label><select id="hotel" form="enquiry-form"><option value="demo-hotel">Demo Hotel A</option><option value="demo-hotel-two">Demo Hotel B</option></select><button id="refresh-property" class="button secondary" type="button">Refresh hotel information</button></div>
+</section>
+<section class="hero guest-hero"><div><span class="eyebrow">GUEST SERVICES</span><h1>How can we help?</h1><p>Get assistance with your stay, make a room enquiry or contact reception. You do not need AI to reach a person.</p>
+<div class="guest-human"><h2>Talk to reception</h2><p>Send a request directly to the human service queue.</p><button class="button primary" type="button" data-kind="human">Message reception</button></div></div>
+<div class="hero-side"><h2 class="tag">Choose a service</h2><div class="service-grid" id="services">
+<button type="button" data-kind="booking"><strong>Room enquiry</strong><span>Dates and preferences</span><span class="service-arrow" aria-hidden="true">›</span></button>
+<button type="button" data-kind="support"><strong>Report a problem</strong><span>Request help with your stay</span><span class="service-arrow" aria-hidden="true">›</span></button>
+<button type="button" data-kind="food"><strong>Dining &amp; food</strong><span>Menus and enquiries</span><span class="service-arrow" aria-hidden="true">›</span></button>
+<button type="button" data-kind="events"><strong>Events</strong><span>Meetings and venues</span><span class="service-arrow" aria-hidden="true">›</span></button>
+<button type="button" data-kind="careers"><strong>Careers</strong><span>Jobs and internships</span><span class="service-arrow" aria-hidden="true">›</span></button>
+<button type="button" data-kind="supplier"><strong>Suppliers</strong><span>Offer your services</span><span class="service-arrow" aria-hidden="true">›</span></button>
 </div></div></section>
 <section class="columns" id="direct-service">
-<article class="panel"><div class="section-label">01 · DIRECT SERVICE</div><h2>No AI required</h2><p>Choose a service above or use the enquiry form. You are not required to use chat to receive human assistance.</p><div class="notice">This is an engineering demo. No room, menu, job listing or dispatch is confirmed.</div></article>
+<article class="panel"><div class="section-label">01 · DIRECT SERVICE</div><h2>Direct assistance</h2><p>Use the enquiry form to send a request to the selected hotel queue, or recover a previous request using its private receipt.</p><a class="button secondary" href="#recover">Track an existing request</a><div class="notice">Development service: no real room inventory, hotel staff, payment or dispatch is connected.</div></article>
 <article class="panel" id="ai-help"><div class="section-label">02 · OPTIONAL ASSISTANCE</div><h2>What do you need?</h2>
 <label for="question">Describe your request</label><textarea id="question" rows="3" placeholder="e.g. I need a room next Friday, or I want to speak to reception"></textarea>
 <div class="actions"><button class="button primary" id="check-intent">Find the right service</button><button class="button secondary" id="human-bypass">Bypass AI</button></div><div id="routing-result" class="result" role="status" aria-live="polite">We use deterministic routing here. No external AI model is called.</div></article>
@@ -31,7 +33,7 @@
 <div><label for="category">What is this about?</label><select id="category" required><option value="booking">Rooms / reservations</option><option value="human">Human support</option><option value="food">Food / dining</option><option value="careers">Job / internship</option><option value="supplier">Supplier proposal</option><option value="events">Events / meetings</option><option value="support">Guest support</option><option value="general">General question</option></select></div>
 <div><label for="name">Your name</label><input id="name" minlength="2" maxlength="100" required autocomplete="name" placeholder="Full name"></div>
 <div><label for="contact">Email or phone number</label><input id="contact" minlength="5" maxlength="200" required autocomplete="email" placeholder="How staff can reach you"></div>
-<div><label for="hotel">Hotel (demo only)</label><select id="hotel"><option value="demo-hotel">Demo Hotel A</option><option value="demo-hotel-two">Demo Hotel B</option></select></div>
+
 </div><label for="details">Request details</label><textarea id="details" minlength="8" maxlength="3000" rows="4" required placeholder="Describe what you need. For bookings, include dates and guests."></textarea>
 <button type="submit" class="button primary">Send to hotel queue</button><div id="submission-result" class="result" role="status" aria-live="polite"></div>
 </form></section>
@@ -59,4 +61,5 @@
 </main>
 <footer class="shell footer">Worthkind Flow · Development reference. No live PMS, payment gateway, voice or hotel staff is connected.</footer>
 <script src="/static/app.js" defer></script>
+<script src="/static/property-context.js" defer></script>
 </body></html>
