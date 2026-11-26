@@ -1,0 +1,146 @@
+name: Backend runtime boundary
+
+on:
+  pull_request:
+    paths:
+      - 'apps/api/**'
+      - '.github/workflows/backend-runtime.yml'
+      - 'db/**'
+      - 'Dockerfile.backend'
+      - 'compose.backend.yml'
+  push:
+    branches: ['work/backend-infrastructure-hardening']
+    paths:
+      - 'apps/api/**'
+      - '.github/workflows/backend-runtime.yml'
+      - 'db/**'
+      - 'Dockerfile.backend'
+      - 'compose.backend.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  backend-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: apps/api
+    env:
+      WF_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements.txt 'httpx>=0.27,<1'
+      - run: python -m unittest -v test_runtime_boundary test_runtime_api test_supabase_identity test_staging_crypto test_cutover_inventory test_provider_boundaries test_ai_boundaries test_email_delivery
+
+  postgres-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: disposable_ci_only
+          POSTGRES_DB: worthkind_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      WF_ENV: test
+      WF_TEST_POSTGRES_DSN: postgresql://postgres:disposable_ci_only@127.0.0.1:5432/worthkind_ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r apps/api/requirements.txt -r apps/api/requirements-pg-test.txt
+      - run: python -m pytest apps/api/tests_pg -q
+
+  restore-rehearsal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: disposable_ci_only
+          POSTGRES_DB: worthkind_ci
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply all repository migrations to disposable database
+        env:
+          PG_CONTAINER: ${{ job.services.postgres.id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for file in db/migrations/*.sql; do
+            docker exec -i "$PG_CONTAINER" psql -X -v ON_ERROR_STOP=1 -U postgres -d worthkind_ci < "$file"
+          done
+      - name: Seed only disposable recovery evidence
+        env:
+          PG_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          docker exec -i "$PG_CONTAINER" psql -X -v ON_ERROR_STOP=1 -U postgres -d worthkind_ci <<'SQL'
+          SELECT worthkind_flow.register_hotel('Recovery test hotel','recovery-test','Recovery test hotel','Africa/Lagos','ci-recovery');
+          SELECT worthkind_flow.activate_hotel('recovery-test','ci-recovery-owner','ci-recovery','ci-evidence-only');
+          SELECT * FROM worthkind_flow.create_guest_case('recovery-test','recovery-test-request',repeat('a',64),repeat('b',64),'booking');
+          SELECT worthkind_flow.project_case_events(100);
+          SQL
+      - name: Backup and restore into a separate disposable database
+        env:
+          PG_CONTAINER: ${{ job.services.postgres.id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker exec "$PG_CONTAINER" pg_dump -U postgres -d worthkind_ci -n worthkind_flow -Fc > "$RUNNER_TEMP/flow-recovery.dump"
+          test -s "$RUNNER_TEMP/flow-recovery.dump"
+          docker exec "$PG_CONTAINER" createdb -U postgres worthkind_restore_ci
+          docker exec -i "$PG_CONTAINER" pg_restore -U postgres -d worthkind_restore_ci --exit-on-error < "$RUNNER_TEMP/flow-recovery.dump"
+      - name: Assert recovered data and security boundaries
+        env:
+          PG_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          docker exec -i "$PG_CONTAINER" psql -X -v ON_ERROR_STOP=1 -U postgres -d worthkind_restore_ci <<'SQL'
+          DO $check$
+          BEGIN
+            IF (SELECT count(*) FROM worthkind_flow.guest_cases) <> 1 THEN RAISE EXCEPTION 'Missing case'; END IF;
+            IF (SELECT count(*) FROM worthkind_flow.case_activity) <> 1 THEN RAISE EXCEPTION 'Missing activity'; END IF;
+            IF (SELECT count(*) FROM worthkind_flow.event_outbox WHERE event_state='pending') <> 1 THEN RAISE EXCEPTION 'Incorrect delivery status'; END IF;
+            IF (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='worthkind_flow' AND c.relkind='r' AND NOT(c.relrowsecurity AND c.relforcerowsecurity)) <> 0 THEN RAISE EXCEPTION 'RLS not restored'; END IF;
+            IF NOT EXISTS(SELECT 1 FROM worthkind_flow.resolve_staff_session('ci-recovery-owner','recovery-test','case:read') WHERE membership_role='owner') THEN RAISE EXCEPTION 'Membership not restored'; END IF;
+          END $check$;
+          SQL
+
+  container-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f Dockerfile.backend -t worthkind-flow-ci .
+      - name: Verify runtime user and isolated staging boot
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(docker run --rm --entrypoint id worthkind-flow-ci -u)" = "10001"
+          docker run -d --name wf-ci-api -p 127.0.0.1:18000:8000 worthkind-flow-ci
+          trap 'docker rm -f wf-ci-api >/dev/null 2>&1 || true' EXIT
+          for i in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:18000/health; then break; fi
+            sleep 1
+          done
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18000/ready)" = 503
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18000/api/properties/demo-hotel)" = 404

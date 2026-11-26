@@ -1,0 +1,1900 @@
+"""Real PostgreSQL tests for M1-A tenancy/RLS.
+
+Run only against a disposable postgres database with a role-creating
+administrator. This test module is intentionally separate from the SQLite
+FastAPI suite and never targets a real hotel database.
+"""
+from contextlib import contextmanager
+import json
+import base64
+import sys
+import time
+import jwt
+from cryptography.hazmat.primitives.asymmetric import rsa
+from fastapi.testclient import TestClient
+from pathlib import Path
+from uuid import uuid4
+import os
+
+import psycopg
+from psycopg import errors
+from psycopg.conninfo import conninfo_to_dict, make_conninfo
+import pytest
+
+
+MIGRATIONS = [
+    Path(__file__).resolve().parents[3] / "db" / "migrations" / name
+    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql", "008_hotel_onboarding_settings.sql", "009_identity_provisioning.sql", "010_guest_quota.sql", "011_private_documents.sql", "012_operational_tickets.sql", "013_content_catalog.sql", "014_rooms_rates.sql", "015_rate_lookup_qualification.sql", "016_inventory_procurement.sql", "017_dining_kitchen.sql", "018_menu_lock_qualification.sql", "019_department_roles.sql", "020_staff_shifts.sql", "021_guest_preferences_feedback.sql", "022_reservation_intents.sql", "023_hotel_finance.sql", "024_events_recruitment.sql", "025_pms_accounts.sql", "026_reception_controls.sql", "027_payment_mode_boundaries.sql", "028_operations_read_contracts.sql", "029_native_booking_inventory.sql", "030_native_booking_changes.sql", "031_pos_receipt_evidence.sql", "032_purchase_batches.sql", "033_partial_refunds.sql", "034_native_stay_invoices.sql", "035_settlement_reconciliation.sql", "036_pms_reservation_evidence.sql", "037_native_stay_operations.sql", "038_pms_commands.sql", "039_provider_sync_guards.sql", "040_pos_refresh_worker.sql", "041_pos_cancellation_guard.sql", "042_pms_readback_recovery.sql", "043_provider_emergency_disable.sql", "044_ai_policy_and_retrieval.sql", "045_ai_automation_and_approvals.sql", "046_ai_retrieval_and_budget_guards.sql", "047_guest_resolution_decisions.sql", "048_staff_property_discovery.sql", "049_reception_handovers.sql", "050_management_reports.sql", "051_guest_department_tracking.sql", "052_staff_attendance.sql", "053_guest_dining_orders.sql", "054_staff_leave.sql", "055_platform_crm.sql", "056_email_notifications.sql", "057_platform_subscription_terms.sql", "058_subscription_cancellation.sql", "059_subscription_ai_allowance.sql")
+]
+
+
+@pytest.fixture(scope="session")
+def pg():
+    dsn = os.environ.get("WF_TEST_POSTGRES_DSN")
+    if not dsn:
+        pytest.skip("Requires an isolated PostgreSQL service and WF_TEST_POSTGRES_DSN")
+    params = conninfo_to_dict(dsn)
+    assert params.get("host") in ("localhost", "127.0.0.1") and params.get("dbname") == "worthkind_ci", (
+        "Tenancy tests only run against the disposable local worthkind_ci database"
+    )
+    with psycopg.connect(dsn, autocommit=True) as conn:
+        for migration in MIGRATIONS:
+            conn.execute(migration.read_text())
+        # Test-only NOINHERIT login roles; never provision real credentials here.
+        conn.execute(
+            "CREATE ROLE wf_ci_guest LOGIN NOINHERIT PASSWORD 'worthkind_ci_guest_only'"
+        )
+        conn.execute("GRANT wf_guest_api TO wf_ci_guest")
+        conn.execute(
+            "CREATE ROLE wf_ci_staff LOGIN NOINHERIT PASSWORD 'worthkind_ci_staff_only'"
+        )
+        conn.execute(
+            "GRANT wf_auth_lookup,wf_staff_runtime,wf_staff_commands TO wf_ci_staff"
+        )
+        conn.execute("CREATE ROLE wf_ci_lifecycle LOGIN NOINHERIT PASSWORD 'worthkind_ci_lifecycle_only'")
+        conn.execute("GRANT wf_staff_lifecycle TO wf_ci_lifecycle")
+        conn.execute("CREATE ROLE wf_ci_projector LOGIN NOINHERIT PASSWORD 'worthkind_ci_projector_only'")
+        conn.execute("GRANT wf_event_projector TO wf_ci_projector")
+        conn.execute("CREATE ROLE wf_ci_provisioner LOGIN NOINHERIT PASSWORD 'worthkind_ci_provisioner_only'")
+        conn.execute("GRANT wf_hotel_provisioner TO wf_ci_provisioner")
+        conn.execute("CREATE ROLE wf_ci_config LOGIN NOINHERIT PASSWORD 'worthkind_ci_config_only'")
+        conn.execute("GRANT wf_property_config TO wf_ci_config")
+        conn.execute("CREATE ROLE wf_ci_quota LOGIN NOINHERIT PASSWORD 'worthkind_ci_quota_only'")
+        conn.execute("GRANT wf_guest_quota TO wf_ci_quota")
+        conn.execute("GRANT wf_document_store,wf_operations TO wf_ci_staff")
+        conn.execute("GRANT wf_public_content TO wf_ci_guest")
+        conn.execute("GRANT wf_ai_gateway TO wf_ci_guest")
+        conn.execute("GRANT wf_ai_policy TO wf_ci_staff")
+        conn.execute("CREATE ROLE wf_ci_crm LOGIN NOINHERIT PASSWORD 'worthkind_ci_crm_only'")
+        conn.execute("GRANT wf_platform_crm TO wf_ci_crm")
+        yield conn
+
+
+@pytest.fixture
+def seeded(pg):
+    # Test runs are serial in one disposable GitHub Actions postgres instance.
+    pg.execute(
+        "TRUNCATE worthkind_flow.event_outbox, worthkind_flow.case_audit_events, "
+        "worthkind_flow.guest_cases, worthkind_flow.staff_memberships, "
+        "worthkind_flow.staff_identities, worthkind_flow.properties, "
+        "worthkind_flow.organizations CASCADE"
+    )
+    organization_a, organization_b = uuid4(), uuid4()
+    property_a, property_b = uuid4(), uuid4()
+    owner, receptionist, housekeeper, outsider, invited, suspended = [uuid4() for _ in range(6)]
+    members = {
+        "owner": uuid4(),
+        "receptionist": uuid4(),
+        "housekeeper": uuid4(),
+        "outsider": uuid4(),
+        "invited": uuid4(),
+        "suspended": uuid4(),
+    }
+    case_a, case_b = uuid4(), uuid4()
+    for oid, name in ((organization_a, "A Organization"), (organization_b, "B Organization")):
+        pg.execute(
+            "INSERT INTO worthkind_flow.organizations(id, legal_name, status) "
+            "VALUES (%s,%s,'verified')", (oid, name)
+        )
+    for pid, oid, slug in (
+        (property_a, organization_a, "hotel-a"),
+        (property_b, organization_b, "hotel-b")
+    ):
+        pg.execute(
+            "INSERT INTO worthkind_flow.properties(id, organization_id, slug, display_name, status) "
+            "VALUES (%s,%s,%s,%s,'active')", (pid, oid, slug, slug.upper())
+        )
+    for uid, subject, state in (
+        (owner, "idp:hotel-a-owner", "active"),
+        (receptionist, "idp:hotel-a-reception", "active"),
+        (housekeeper, "idp:hotel-a-housekeeper", "active"),
+        (outsider, "idp:hotel-b-reception", "active"),
+        (invited, "idp:hotel-a-invited", "active"),
+        (suspended, "idp:hotel-a-suspended", "suspended"),
+    ):
+        pg.execute(
+            "INSERT INTO worthkind_flow.staff_identities(id,provider_subject,state) "
+            "VALUES (%s,%s,%s)", (uid, subject, state)
+        )
+    for member, pid, oid, uid, role, status in (
+        (members["owner"], property_a, organization_a, owner, "owner", "active"),
+        (members["receptionist"], property_a, organization_a, receptionist, "reception", "active"),
+        (members["housekeeper"], property_a, organization_a, housekeeper, "housekeeping", "active"),
+        (members["outsider"], property_b, organization_b, outsider, "reception", "active"),
+        (members["invited"], property_a, organization_a, invited, "reception", "invited"),
+        (members["suspended"], property_a, organization_a, suspended, "reception", "active"),
+    ):
+        pg.execute(
+            "INSERT INTO worthkind_flow.staff_memberships"
+            "(id, organization_id, property_id, identity_id, role, state, activated_at) "
+            "VALUES (%s,%s,%s,%s,%s,%s,CASE WHEN %s = 'active' THEN now() ELSE NULL END)",
+            (member, oid, pid, uid, role, status, status)
+        )
+    for cid, pid, key in (
+        (case_a, property_a, "request-key-for-hotel-a"),
+        (case_b, property_b, "request-key-for-hotel-b"),
+    ):
+        pg.execute(
+            "INSERT INTO worthkind_flow.guest_cases "
+            "(id,property_id,request_key,payload_hash,receipt_hash,kind) "
+            "VALUES (%s,%s,%s,%s,%s,'booking')",
+            (cid, pid, key, "a" * 64, "b" * 64)
+        )
+    return {
+        "org_a": organization_a, "org_b": organization_b,
+        "property_a": property_a, "property_b": property_b,
+        "case_a": case_a, "case_b": case_b,
+        "owner": owner, "receptionist": receptionist,
+        "housekeeper": housekeeper, "outsider": outsider,
+        "invited": invited, "suspended": suspended,
+        "members": members,
+    }
+
+
+@contextmanager
+def actor_session(pg, actor=None):
+    """Mimic a trusted API which verified the identity BEFORE setting it."""
+    with pg.transaction():
+        pg.execute("SET LOCAL ROLE wf_staff_runtime")
+        if actor is not None:
+            pg.execute(
+                "SELECT set_config('wf.actor_id', %s, true)",
+                (str(actor),)
+            )
+        yield pg
+
+
+def rows(pg, table):
+    return pg.execute(f"SELECT * FROM worthkind_flow.{table}").fetchall()
+
+
+def test_active_owner_and_reception_can_only_read_own_property_cases(pg, seeded):
+    with actor_session(pg, seeded["owner"]):
+        assert len(rows(pg, "organizations")) == 1
+        assert len(rows(pg, "properties")) == 1
+        cases = rows(pg, "guest_cases")
+        assert len(cases) == 1 and cases[0][0] == seeded["case_a"]
+        assert len(rows(pg, "staff_memberships")) == 1  # self only
+        assert len(rows(pg, "staff_identities")) == 1
+    with actor_session(pg, seeded["receptionist"]):
+        assert len(rows(pg, "guest_cases")) == 1
+        assert rows(pg, "guest_cases")[0][0] == seeded["case_a"]
+    with actor_session(pg, seeded["outsider"]):
+        assert len(rows(pg, "guest_cases")) == 1
+        assert rows(pg, "guest_cases")[0][0] == seeded["case_b"]
+
+
+def test_no_actor_invited_suspended_and_non_reception_are_denied(pg, seeded):
+    with actor_session(pg):
+        for table in ("organizations", "properties", "staff_memberships", "guest_cases"):
+            assert rows(pg, table) == []
+    for user in ("invited", "suspended"):
+        with actor_session(pg, seeded[user]):
+            assert rows(pg, "guest_cases") == []
+            assert rows(pg, "properties") == []
+    with actor_session(pg, seeded["housekeeper"]):
+        assert len(rows(pg, "properties")) == 1
+        assert rows(pg, "guest_cases") == []  # least-privilege dept scope
+
+
+def test_revocation_and_property_pause_take_effect_on_next_transaction(pg, seeded):
+    with actor_session(pg, seeded["receptionist"]):
+        assert len(rows(pg, "guest_cases")) == 1
+    pg.execute(
+        "UPDATE worthkind_flow.staff_memberships SET state='revoked',revoked_at=now() "
+        "WHERE id=%s", (seeded["members"]["receptionist"],)
+    )
+    with actor_session(pg, seeded["receptionist"]):
+        assert rows(pg, "guest_cases") == []
+        assert rows(pg, "properties") == []
+    with actor_session(pg, seeded["owner"]):
+        assert len(rows(pg, "guest_cases")) == 1
+    pg.execute(
+        "UPDATE worthkind_flow.properties SET status='suspended' WHERE id=%s",
+        (seeded["property_a"],)
+    )
+    with actor_session(pg, seeded["owner"]):
+        assert rows(pg, "guest_cases") == []
+
+
+def test_staff_role_cannot_mutate_or_inspect_outbox_and_audit(pg, seeded):
+    with pytest.raises(errors.InsufficientPrivilege):
+        with actor_session(pg, seeded["owner"]):
+            rows(pg, "case_audit_events")
+    with pytest.raises(errors.InsufficientPrivilege):
+        with actor_session(pg, seeded["owner"]):
+            pg.execute(
+                "UPDATE worthkind_flow.guest_cases SET state='claimed' WHERE id=%s",
+                (seeded["case_a"],)
+            )
+    with pytest.raises(errors.InsufficientPrivilege):
+        with actor_session(pg, seeded["owner"]):
+            pg.execute(
+                "DELETE FROM worthkind_flow.staff_memberships WHERE id=%s",
+                (seeded["members"]["owner"],)
+            )
+    with actor_session(pg, seeded["owner"]):
+        assert rows(pg, "guest_cases")[0][0] == seeded["case_a"]
+
+
+def test_cross_tenant_member_link_and_assignment_rejected(pg, seeded):
+    with pytest.raises(errors.ForeignKeyViolation):
+        with pg.transaction():
+            pg.execute(
+                "INSERT INTO worthkind_flow.staff_memberships "
+                "(organization_id,property_id,identity_id,role,state,activated_at) "
+                "VALUES (%s,%s,%s,'manager','active',now())",
+                (seeded["org_b"], seeded["property_a"], seeded["outsider"])
+            )
+    with pytest.raises(errors.ForeignKeyViolation):
+        with pg.transaction():
+            pg.execute(
+                "UPDATE worthkind_flow.guest_cases SET assigned_membership_id=%s "
+                "WHERE id=%s", (seeded["members"]["outsider"], seeded["case_a"])
+            )
+
+
+def test_property_scoped_request_key_uniqueness_and_no_seed_fixture(pg, seeded):
+    with pytest.raises(errors.UniqueViolation):
+        with pg.transaction():
+            pg.execute(
+                "INSERT INTO worthkind_flow.guest_cases "
+                "(property_id,request_key,payload_hash,receipt_hash,kind) "
+                "VALUES (%s,%s,%s,%s,'booking')",
+                (seeded["property_a"], "request-key-for-hotel-a", "a"*64, "b"*64)
+            )
+    # Same client key in the other property is allowed (key scoped by property).
+    pg.execute(
+        "INSERT INTO worthkind_flow.guest_cases "
+        "(property_id,request_key,payload_hash,receipt_hash,kind) "
+        "VALUES (%s,%s,%s,%s,'booking')",
+        (seeded["property_b"], "request-key-for-hotel-a", "a"*64, "b"*64)
+    )
+    assert pg.execute(
+        "SELECT COUNT(*) FROM worthkind_flow.guest_cases"
+    ).fetchone()[0] == 3
+
+
+def test_identity_membership_date_and_role_validation(pg, seeded):
+    with pytest.raises(errors.CheckViolation):
+        with pg.transaction():
+            pg.execute(
+                "INSERT INTO worthkind_flow.staff_memberships "
+                "(organization_id,property_id,identity_id,role,state) "
+                "VALUES (%s,%s,%s,'superadmin','invited')",
+                (seeded["org_a"], seeded["property_a"], seeded["owner"])
+            )
+    with pytest.raises(errors.CheckViolation):
+        with pg.transaction():
+            pg.execute(
+                "UPDATE worthkind_flow.staff_memberships "
+                "SET state='active', activated_at=NULL WHERE id=%s",
+                (seeded["members"]["owner"],)
+            )
+
+
+@contextmanager
+def command_session(pg, role, actor=None):
+    assert role in {"wf_guest_api", "wf_staff_commands"}
+    with pg.transaction():
+        pg.execute(f"SET LOCAL ROLE {role}")
+        if actor is not None:
+            pg.execute("SELECT set_config('wf.actor_id', %s, true)", (str(actor),))
+        yield pg
+
+
+def create_guest(pg, key, slug="hotel-a", payload="a" * 64, proof="b" * 64):
+    return pg.execute(
+        "SELECT * FROM worthkind_flow.create_guest_case(%s,%s,%s,%s,'booking')",
+        (slug, key, payload, proof),
+    ).fetchone()
+
+
+def count_events(pg, case_id):
+    return (
+        pg.execute(
+            "SELECT COUNT(*) FROM worthkind_flow.case_audit_events WHERE case_id=%s",
+            (case_id,),
+        ).fetchone()[0],
+        pg.execute(
+            "SELECT COUNT(*) FROM worthkind_flow.event_outbox WHERE case_id=%s",
+            (case_id,),
+        ).fetchone()[0],
+    )
+
+
+def test_guest_case_command_commits_case_audit_outbox_once(pg, seeded):
+    with command_session(pg, "wf_guest_api"):
+        first = create_guest(pg, "new-case-key-11111111")
+    assert first[1:] == ("queued", False)
+    assert count_events(pg, first[0]) == (1, 1)
+    with command_session(pg, "wf_guest_api"):
+        again = create_guest(pg, "new-case-key-11111111")
+    assert again[0] == first[0]
+    assert again[1:] == ("queued", True)
+    assert count_events(pg, first[0]) == (1, 1)
+    with pytest.raises(errors.UniqueViolation):
+        with command_session(pg, "wf_guest_api"):
+            create_guest(pg, "new-case-key-11111111", proof="f" * 64)
+    assert count_events(pg, first[0]) == (1, 1)
+
+
+def test_guest_command_rejects_unknown_inactive_and_invalid(pg, seeded):
+    for slug in ("nonexistent-hotel", "hotel-bad"):
+        with pytest.raises(errors.NoDataFound):
+            with command_session(pg, "wf_guest_api"):
+                create_guest(pg, "different-valid-key-123", slug)
+    with pytest.raises(errors.InvalidParameterValue):
+        with command_session(pg, "wf_guest_api"):
+            create_guest(pg, "x")
+    pg.execute(
+        "UPDATE worthkind_flow.organizations SET status='suspended' WHERE id=%s",
+        (seeded["org_a"],)
+    )
+    with pytest.raises(errors.NoDataFound):
+        with command_session(pg, "wf_guest_api"):
+            create_guest(pg, "inactive-property-key-123")
+
+
+def test_claim_and_reply_are_atomic_and_explicitly_pending_delivery(pg, seeded):
+    with command_session(pg, "wf_guest_api"):
+        new_case = create_guest(pg, "claim-and-reply-key-123")[0]
+    with command_session(pg, "wf_staff_commands", seeded["receptionist"]):
+        claim = pg.execute(
+            "SELECT * FROM worthkind_flow.claim_guest_case(%s,%s)",
+            (seeded["property_a"], new_case)
+        ).fetchone()
+    assert claim == (new_case, "claimed")
+    with command_session(pg, "wf_staff_commands", seeded["receptionist"]):
+        reply = pg.execute(
+            "SELECT * FROM worthkind_flow.record_case_reply(%s,%s,%s,%s)",
+            (seeded["property_a"], new_case, bytes(range(32)), "c" * 64)
+        ).fetchone()
+    assert reply == (new_case, "responded")
+    assert count_events(pg, new_case) == (3, 3)
+    states = pg.execute(
+        "SELECT action FROM worthkind_flow.case_audit_events "
+        "WHERE case_id=%s ORDER BY created_at, id", (new_case,)
+    ).fetchall()
+    assert {s[0] for s in states} == {"case_created", "case_claimed", "case_responded"}
+    outbox_states = pg.execute(
+        "SELECT DISTINCT event_state FROM worthkind_flow.event_outbox WHERE case_id=%s",
+        (new_case,)
+    ).fetchall()
+    assert outbox_states == [("pending",)]  # No real messages sent
+
+
+def test_commands_reject_cross_hotel_and_unauthorized_staff(pg, seeded):
+    for actor in ("outsider", "housekeeper", "invited", "suspended"):
+        with pytest.raises(errors.InsufficientPrivilege):
+            with command_session(pg, "wf_staff_commands", seeded[actor]):
+                pg.execute(
+                    "SELECT * FROM worthkind_flow.claim_guest_case(%s,%s)",
+                    (seeded["property_a"], seeded["case_a"])
+                )
+    with command_session(pg, "wf_staff_commands", seeded["owner"]):
+        assert pg.execute(
+            "SELECT * FROM worthkind_flow.claim_guest_case(%s,%s)",
+            (seeded["property_a"], seeded["case_a"])
+        ).fetchone()[1] == "claimed"
+    with pytest.raises(errors.NoDataFound):
+        with command_session(pg, "wf_staff_commands", seeded["owner"]):
+            pg.execute(
+                "SELECT * FROM worthkind_flow.claim_guest_case(%s,%s)",
+                (seeded["property_a"], seeded["case_a"])
+            )
+    assert count_events(pg, seeded["case_a"]) == (1, 1)
+
+
+def test_reply_must_be_by_claiming_member_with_valid_encrypted_metadata(pg, seeded):
+    with command_session(pg, "wf_staff_commands", seeded["receptionist"]):
+        pg.execute(
+            "SELECT * FROM worthkind_flow.claim_guest_case(%s,%s)",
+            (seeded["property_a"], seeded["case_a"])
+        )
+    with pytest.raises(errors.NoDataFound):
+        with command_session(pg, "wf_staff_commands", seeded["owner"]):
+            pg.execute(
+                "SELECT * FROM worthkind_flow.record_case_reply(%s,%s,%s,%s)",
+                (seeded["property_a"], seeded["case_a"], bytes(range(32)), "c" * 64)
+            )
+    with pytest.raises(errors.InvalidParameterValue):
+        with command_session(pg, "wf_staff_commands", seeded["receptionist"]):
+            pg.execute(
+                "SELECT * FROM worthkind_flow.record_case_reply(%s,%s,%s,%s)",
+                (seeded["property_a"], seeded["case_a"], b"plain", "c" * 64)
+            )
+    pg.execute(
+        "UPDATE worthkind_flow.staff_memberships SET state='revoked',revoked_at=now() "
+        "WHERE id=%s", (seeded["members"]["receptionist"],)
+    )
+    with pytest.raises(errors.InsufficientPrivilege):
+        with command_session(pg, "wf_staff_commands", seeded["receptionist"]):
+            pg.execute(
+                "SELECT * FROM worthkind_flow.record_case_reply(%s,%s,%s,%s)",
+                (seeded["property_a"], seeded["case_a"], bytes(range(32)), "c" * 64)
+            )
+    assert count_events(pg, seeded["case_a"]) == (1, 1)
+
+
+def test_command_roles_cannot_bypass_to_base_tables_or_other_commands(pg, seeded):
+    with pytest.raises(errors.InsufficientPrivilege):
+        with command_session(pg, "wf_guest_api"):
+            pg.execute(
+                "SELECT * FROM worthkind_flow.claim_guest_case(%s,%s)",
+                (seeded["property_a"], seeded["case_a"])
+            )
+    with pytest.raises(errors.InsufficientPrivilege):
+        with command_session(pg, "wf_staff_commands", seeded["owner"]):
+            create_guest(pg, "staff-cannot-create-case")
+    with pytest.raises(errors.InsufficientPrivilege):
+        with command_session(pg, "wf_guest_api"):
+            pg.execute("SELECT COUNT(*) FROM worthkind_flow.guest_cases")
+
+
+def test_audit_or_outbox_insert_failure_rolls_back_entire_guest_command(pg, seeded):
+    before = pg.execute(
+        "SELECT COUNT(*) FROM worthkind_flow.guest_cases"
+    ).fetchone()[0]
+    with pytest.raises(errors.CheckViolation):
+        with pg.transaction():
+            # Local test-only constraint is rolled back with the command error.
+            pg.execute(
+                "ALTER TABLE worthkind_flow.event_outbox "
+                "ADD CONSTRAINT wf_ci_force_failure CHECK (false) NOT VALID"
+            )
+            pg.execute("SET LOCAL ROLE wf_guest_api")
+            create_guest(pg, "rollback-case-120122300")
+    assert pg.execute(
+        "SELECT COUNT(*) FROM worthkind_flow.guest_cases"
+    ).fetchone()[0] == before
+    assert pg.execute(
+        "SELECT COUNT(*) FROM worthkind_flow.case_audit_events "
+        "WHERE action='case_created'"
+    ).fetchone()[0] == 0
+
+
+def test_parallel_claim_permits_one_reception_owner(pg, seeded):
+    from concurrent.futures import ThreadPoolExecutor
+    dsn = os.environ["WF_TEST_POSTGRES_DSN"]
+    def claim(actor):
+        try:
+            with psycopg.connect(dsn, autocommit=True) as connection:
+                with command_session(connection, "wf_staff_commands", actor):
+                    return connection.execute(
+                        "SELECT * FROM worthkind_flow.claim_guest_case(%s,%s)",
+                        (seeded["property_a"], seeded["case_a"]),
+                    ).fetchone()[1]
+        except errors.NoDataFound:
+            return "already_claimed"
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(claim, (seeded["owner"], seeded["receptionist"])))
+    assert sorted(outcomes) == ["already_claimed", "claimed"]
+    assert count_events(pg, seeded["case_a"]) == (1, 1)
+
+
+@pytest.fixture
+def oidc_rig(pg, seeded, monkeypatch, tmp_path):
+    # Signed local test identities. No real IdP or personal identity records used.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    import main
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    jwk = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(private_key.public_key()))
+    jwk.update({"kid": "ci-rsa-key-01", "alg": "RS256", "use": "sig"})
+    monkeypatch.setenv("WF_OIDC_JWKS_JSON", json.dumps({"keys": [jwk]}))
+    monkeypatch.setenv("WF_OIDC_ISSUER", "https://issuer.unit-test.invalid")
+    monkeypatch.setenv("WF_OIDC_AUDIENCE", "worthkind-flow-test")
+    guest_dsn = make_conninfo(
+        os.environ["WF_TEST_POSTGRES_DSN"],
+        user="wf_ci_guest", password="worthkind_ci_guest_only",
+    )
+    staff_dsn = make_conninfo(
+        os.environ["WF_TEST_POSTGRES_DSN"],
+        user="wf_ci_staff", password="worthkind_ci_staff_only",
+    )
+    monkeypatch.setenv("WF_GUEST_POSTGRES_DSN", guest_dsn)
+    monkeypatch.setenv("WF_STAFF_POSTGRES_DSN", staff_dsn)
+    monkeypatch.setenv("WF_STAFF_LIFECYCLE_POSTGRES_DSN", make_conninfo(os.environ["WF_TEST_POSTGRES_DSN"], user="wf_ci_lifecycle", password="worthkind_ci_lifecycle_only"))
+    monkeypatch.setenv("WF_DATA_KEY_B64", base64.b64encode(os.urandom(32)).decode())
+    monkeypatch.setenv("WF_ENABLE_PG_GUEST_API", "1")
+    monkeypatch.setenv("WF_GUEST_QUOTA_POSTGRES_DSN", make_conninfo(os.environ["WF_TEST_POSTGRES_DSN"], user="wf_ci_quota", password="worthkind_ci_quota_only"))
+    monkeypatch.setenv("WF_GUEST_QUOTA_SECRET", "test-only-quota-secret-not-for-deployment")
+    monkeypatch.setenv("WF_PROPERTY_CONFIG_POSTGRES_DSN", make_conninfo(os.environ["WF_TEST_POSTGRES_DSN"], user="wf_ci_config", password="worthkind_ci_config_only"))
+    monkeypatch.setenv("WF_DATABASE_PATH", str(tmp_path / "api.sqlite3"))
+    with TestClient(main.app) as client:
+        yield client, private_key, seeded
+
+
+def signed_token(key, subject, *, issuer="https://issuer.unit-test.invalid",
+                 audience="worthkind-flow-test", expires=3600, kid="ci-rsa-key-01"):
+    now = int(time.time())
+    payload = {
+        "sub": subject,
+        "iss": issuer,
+        "aud": audience,
+        "iat": now - 5,
+        "exp": now + expires,
+    }
+    return jwt.encode(payload, key, algorithm="RS256", headers={"kid": kid})
+
+
+def auth_header(token):
+    return {"Authorization": "Bearer " + token}
+
+
+def test_oidc_staff_case_api_reads_only_verified_property_metadata(pg, oidc_rig):
+    client, key, source = oidc_rig
+    token = signed_token(key, "idp:hotel-a-owner")
+    response = client.get("/api/v1/properties/hotel-a/staff/cases", headers=auth_header(token))
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["source"] == "postgres_case_metadata"
+    assert payload["property"] == "hotel-a"
+    assert payload["staff_role"] == "owner"
+    assert len(payload["cases"]) == 1
+    assert payload["cases"][0]["id"] == str(source["case_a"])
+    assert "receipt_hash" not in str(payload)
+    assert "staff_reply" not in str(payload)
+    assert payload["live_notifications"] is False
+    assert response.headers["cache-control"] == "no-store"
+
+    foreign = client.get("/api/v1/properties/hotel-b/staff/cases", headers=auth_header(token))
+    assert foreign.status_code == 403
+    assert foreign.headers["cache-control"] == "no-store"
+    assert "hotel-b" not in str(foreign.json())
+
+
+def test_oidc_staff_claim_api_is_atomic_and_denies_repeat(pg, oidc_rig):
+    client, key, source = oidc_rig
+    url = f"/api/v1/properties/hotel-a/staff/cases/{source['case_a']}/claim"
+    token = signed_token(key, "idp:hotel-a-reception")
+    first = client.post(url, headers=auth_header(token))
+    assert first.status_code == 200, first.text
+    assert first.json()["status"] == "claimed"
+    assert first.json()["notification_delivery"] == "not_connected"
+    assert count_events(pg, source["case_a"]) == (1, 1)
+    second = client.post(url, headers=auth_header(token))
+    assert second.status_code == 403
+    assert count_events(pg, source["case_a"]) == (1, 1)
+
+
+def test_oidc_untrusted_tokens_are_rejected_even_with_known_subject(pg, oidc_rig):
+    client, key, source = oidc_rig
+    base = "/api/v1/properties/hotel-a/staff/cases"
+    good = signed_token(key, "idp:hotel-a-owner")
+    invalid = [
+        None,
+        "Bearer definitely-not-a-jwt",
+        jwt.encode(
+            {"sub": "idp:hotel-a-owner", "iat": int(time.time()),
+             "exp": int(time.time())+3600, "iss": "https://issuer.unit-test.invalid",
+             "aud": "worthkind-flow-test"},
+            "untrusted-shared-key-longer-than-32-bytes", algorithm="HS256",
+            headers={"kid": "ci-rsa-key-01"}
+        ),
+        signed_token(key, "idp:hotel-a-owner", issuer="https://evil.invalid"),
+        signed_token(key, "idp:hotel-a-owner", audience="other-service"),
+        signed_token(key, "idp:hotel-a-owner", expires=-7200),
+        signed_token(key, "idp:hotel-a-owner", kid="unknown-issuer-key"),
+        good[:-2] + "xx",
+    ]
+    for candidate in invalid:
+        reply = client.get(base, headers=auth_header(candidate) if candidate else {})
+        assert reply.status_code == 401, (candidate, reply.status_code, reply.text)
+        assert reply.headers["cache-control"] == "no-store"
+    assert client.get(base, headers=auth_header(good)).status_code == 200
+
+
+def test_oidc_role_invite_revocation_and_suspension_are_database_authoritative(
+    pg, oidc_rig
+):
+    client, key, source = oidc_rig
+    base = "/api/v1/properties/hotel-a/staff/cases"
+    for subject in ("idp:hotel-a-housekeeper", "idp:hotel-a-invited",
+                    "idp:hotel-a-suspended", "idp:hotel-b-reception"):
+        reply = client.get(base, headers=auth_header(signed_token(key, subject)))
+        assert reply.status_code == 403, (subject, reply.status_code)
+    authorized = auth_header(signed_token(key, "idp:hotel-a-reception"))
+    assert client.get(base, headers=authorized).status_code == 200
+    pg.execute(
+        "UPDATE worthkind_flow.staff_memberships SET state='revoked',revoked_at=now() "
+        "WHERE id=%s", (source["members"]["receptionist"],)
+    )
+    assert client.get(base, headers=authorized).status_code == 403
+
+
+def test_oidc_missing_server_config_fails_closed(pg, oidc_rig, monkeypatch):
+    client, key, source = oidc_rig
+    token = signed_token(key, "idp:hotel-a-owner")
+    path = "/api/v1/properties/hotel-a/staff/cases"
+    monkeypatch.delenv("WF_STAFF_POSTGRES_DSN")
+    assert client.get(path, headers=auth_header(token)).status_code == 503
+    monkeypatch.delenv("WF_OIDC_JWKS_JSON")
+    assert client.get(path, headers=auth_header(token)).status_code == 503
+    assert client.get(path).status_code == 401
+
+
+def guest_payload():
+    return {
+        "request_key": "guest-flow-key-012345",
+        "receipt_token": "P" * 43,
+        "kind": "booking",
+        "name": "Synthetic Guest Person",
+        "contact": "guest@example.invalid",
+        "details": "A room enquiry for next Friday, not a confirmed booking",
+    }
+
+
+def test_encrypted_guest_to_signed_reception_to_private_response(pg, oidc_rig):
+    client, private_key, seed = oidc_rig
+    body = guest_payload()
+    submitted = client.post("/api/v1/properties/hotel-a/enquiries", json=body)
+    assert submitted.status_code == 201, submitted.text
+    case_id = submitted.json()["case_id"]
+    assert submitted.json()["status"] == "queued"
+    assert "no room, order, payment or staff reply is confirmed" in submitted.json()["message"].lower()
+    assert submitted.headers["cache-control"] == "no-store"
+    assert count_events(pg, case_id) == (1, 1)
+
+    stored = pg.execute(
+        "SELECT encrypted_guest_payload,receipt_hash "
+        "FROM worthkind_flow.guest_cases WHERE id=%s", (case_id,)
+    ).fetchone()
+    assert stored and len(stored[0]) >= 29
+    assert b"Synthetic Guest" not in bytes(stored[0])
+    assert b"guest@example.invalid" not in bytes(stored[0])
+    assert stored[1] != body["receipt_token"]
+
+    status_path = f"/api/v1/properties/hotel-a/enquiries/{case_id}"
+    assert client.get(status_path).status_code == 404
+    assert client.get(status_path, headers={"X-Receipt-Token": "Q" * 43}).status_code == 404
+    queued = client.get(status_path, headers={"X-Receipt-Token": body["receipt_token"]})
+    assert queued.status_code == 200
+    assert queued.json()["status"] == "queued"
+    assert queued.json()["staff_reply"] is None
+    assert queued.json()["booking_confirmed"] is False
+
+    token = signed_token(private_key, "idp:hotel-a-reception")
+    staff_base = "/api/v1/properties/hotel-a/staff/cases"
+    queue = client.get(staff_base, headers=auth_header(token))
+    assert queue.status_code == 200, queue.text
+    match = [item for item in queue.json()["cases"] if item["id"] == case_id]
+    assert len(match) == 1
+    assert match[0]["customer_name"] == body["name"]
+    assert match[0]["contact"] == body["contact"]
+    assert match[0]["details"] == body["details"]
+
+    claim = client.post(f"{staff_base}/{case_id}/claim", headers=auth_header(token))
+    assert claim.status_code == 200, claim.text
+    reply_text = "Reception will review the request. The room is not confirmed."
+    reply = client.post(
+        f"{staff_base}/{case_id}/respond",
+        headers=auth_header(token),
+        json={"message": reply_text},
+    )
+    assert reply.status_code == 200, reply.text
+    assert reply.json()["status"] == "responded"
+    assert reply.json()["notification_delivery"] == "not_connected"
+    assert client.post(
+        f"{staff_base}/{case_id}/respond",
+        headers=auth_header(token),
+        json={"message": reply_text},
+    ).status_code == 403
+    assert count_events(pg, case_id) == (3, 3)
+
+    response = client.get(status_path, headers={"X-Receipt-Token": body["receipt_token"]})
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "responded"
+    assert response.json()["staff_reply"] == reply_text
+    assert response.json()["delivery_state"] == "not_connected"
+    assert response.json()["booking_confirmed"] is False
+    assert response.headers["cache-control"] == "no-store"
+
+
+def test_guest_retry_conflict_tenant_and_encryption_tampering(pg, oidc_rig, monkeypatch):
+    client, key, seed = oidc_rig
+    base = "/api/v1/properties/hotel-a/enquiries"
+    payload = guest_payload()
+    first = client.post(base, json=payload)
+    assert first.status_code == 201
+    case_id = first.json()["case_id"]
+    retry = client.post(base, json=payload)
+    assert retry.status_code == 201
+    assert retry.json()["duplicate"] is True
+    assert retry.json()["case_id"] == case_id
+    assert count_events(pg, case_id) == (1, 1)
+
+    changed = dict(payload, details="Another changed request needs its own key")
+    assert client.post(base, json=changed).status_code == 409
+    other_hotel_status = client.get(
+        f"/api/v1/properties/hotel-b/enquiries/{case_id}",
+        headers={"X-Receipt-Token": payload["receipt_token"]},
+    )
+    assert other_hotel_status.status_code == 404
+
+    # Changing encryption key prevents plaintext exposure, not silent corruption.
+    monkeypatch.setenv("WF_DATA_KEY_B64", base64.b64encode(os.urandom(32)).decode())
+    token = signed_token(key, "idp:hotel-a-owner")
+    failed_staff_read = client.get(
+        "/api/v1/properties/hotel-a/staff/cases", headers=auth_header(token)
+    )
+    assert failed_staff_read.status_code == 503
+    assert payload["contact"] not in failed_staff_read.text
+
+
+def test_guest_api_feature_and_key_configuration_fail_closed(pg, oidc_rig, monkeypatch):
+    client, key, seed = oidc_rig
+    payload = guest_payload()
+    monkeypatch.delenv("WF_ENABLE_PG_GUEST_API")
+    assert client.post("/api/v1/properties/hotel-a/enquiries", json=payload).status_code == 503
+    monkeypatch.setenv("WF_ENABLE_PG_GUEST_API", "1")
+    monkeypatch.delenv("WF_DATA_KEY_B64")
+    assert client.post("/api/v1/properties/hotel-a/enquiries", json=payload).status_code == 503
+
+
+def test_separate_database_logins_cannot_swap_guest_and_staff_capabilities(pg, seeded):
+    guest_dsn = make_conninfo(
+        os.environ["WF_TEST_POSTGRES_DSN"],
+        user="wf_ci_guest", password="worthkind_ci_guest_only",
+    )
+    staff_dsn = make_conninfo(
+        os.environ["WF_TEST_POSTGRES_DSN"],
+        user="wf_ci_staff", password="worthkind_ci_staff_only",
+    )
+    with psycopg.connect(guest_dsn) as guest:
+        with pytest.raises(errors.InsufficientPrivilege):
+            with guest.transaction():
+                guest.execute("SET LOCAL ROLE wf_staff_commands")
+        with pytest.raises(errors.InsufficientPrivilege):
+            with guest.transaction():
+                guest.execute("SELECT * FROM worthkind_flow.guest_cases")
+        with guest.transaction():
+            guest.execute("SET LOCAL ROLE wf_guest_api")
+            result = create_guest(guest, "guest-login-key-01111")
+            assert result[1] == "queued"
+    with psycopg.connect(staff_dsn) as staff:
+        with pytest.raises(errors.InsufficientPrivilege):
+            with staff.transaction():
+                staff.execute("SET LOCAL ROLE wf_guest_api")
+        with staff.transaction():
+            staff.execute("SET LOCAL ROLE wf_auth_lookup")
+            row = staff.execute(
+                "SELECT * FROM worthkind_flow.resolve_staff_session(%s,%s,%s)",
+                ("idp:hotel-a-owner", "hotel-a", "case:read"),
+            ).fetchone()
+            assert row[2] == seeded["property_a"]
+
+
+def test_suspended_organization_blocks_direct_runtime_reads(pg, seeded):
+    pg.execute("UPDATE worthkind_flow.organizations SET status='suspended' WHERE id=%s", (seeded["org_a"],))
+    with actor_session(pg, seeded["owner"]):
+        for table in ("organizations", "properties", "guest_cases"):
+            assert rows(pg, table) == []
+    with actor_session(pg, seeded["outsider"]):
+        assert len(rows(pg, "guest_cases")) == 1
+        assert rows(pg, "guest_cases")[0][0] == seeded["case_b"]
+
+
+def test_staff_invite_accept_revoke_and_audit(pg, oidc_rig):
+    client, key, source = oidc_rig
+    base = "/api/v1/properties/hotel-a/staff/memberships"
+    owner = auth_header(signed_token(key, "idp:hotel-a-owner"))
+    outsider = auth_header(signed_token(key, "idp:hotel-b-reception"))
+    body = {"provider_subject": "idp:hotel-b-reception", "role": "reception"}
+    assert client.post(base+"/invite", json=body, headers=outsider).status_code == 403
+    invite = client.post(base+"/invite", json=body, headers=owner)
+    assert invite.status_code == 201, invite.text
+    assert invite.json()["state"] == "invited"
+    assert client.post(base+"/invite", json=body, headers=owner).status_code == 409
+    cases = "/api/v1/properties/hotel-a/staff/cases"
+    assert client.get(cases, headers=outsider).status_code == 403
+    accepted = client.post(base+"/accept", headers=outsider)
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["state"] == "active"
+    assert client.get(cases, headers=outsider).status_code == 200
+    assert client.post(base+"/revoke", json={"provider_subject": "idp:hotel-a-owner"}, headers=outsider).status_code == 403
+    revoked = client.post(base+"/revoke", json={"provider_subject": body["provider_subject"]}, headers=owner)
+    assert revoked.status_code == 200, revoked.text
+    assert revoked.json()["state"] == "revoked"
+    assert client.get(cases, headers=outsider).status_code == 403
+    assert client.get("/api/v1/properties/hotel-b/staff/cases", headers=outsider).status_code == 200
+    actions = pg.execute("SELECT action FROM worthkind_flow.staff_membership_events WHERE membership_id=%s ORDER BY CASE action WHEN 'invited' THEN 1 WHEN 'activated' THEN 2 ELSE 3 END", (invite.json()["membership_id"],)).fetchall()
+    assert actions == [("invited",), ("activated",), ("revoked",)]
+
+
+def test_internal_event_projection_is_atomic_and_idempotent(pg, oidc_rig):
+    from event_projector import project_batch
+    from concurrent.futures import ThreadPoolExecutor
+    client, key, source = oidc_rig
+    for i in range(6):
+        pg.execute("INSERT INTO worthkind_flow.event_outbox(property_id,case_id,event_type) VALUES (%s,%s,%s)", (source["property_a"], source["case_a"], "case_created"))
+    dsn = make_conninfo(os.environ["WF_TEST_POSTGRES_DSN"], user="wf_ci_projector", password="worthkind_ci_projector_only")
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda _: project_batch(dsn, 3), range(2)))
+    assert sum(results) == 6
+    assert project_batch(dsn) == 0
+    assert pg.execute("SELECT count(*) FROM worthkind_flow.case_activity").fetchone()[0] == 6
+    assert pg.execute("SELECT count(*) FROM worthkind_flow.event_outbox WHERE projected_at IS NOT NULL AND event_state='pending'").fetchone()[0] == 6
+    with psycopg.connect(dsn) as conn:
+        with pytest.raises(errors.InsufficientPrivilege):
+            with conn.transaction():
+                conn.execute("SET LOCAL ROLE wf_event_projector")
+                conn.execute("SELECT * FROM worthkind_flow.guest_cases")
+
+
+def test_operator_onboarding_and_guest_intake_switch(pg, oidc_rig):
+    from hotel_provisioner import run_command
+    client, key, source = oidc_rig
+    dsn = make_conninfo(os.environ["WF_TEST_POSTGRES_DSN"], user="wf_ci_provisioner", password="worthkind_ci_provisioner_only")
+    prop = run_command(dsn,"register",["New Hotel Ltd","hotel-new","New Hotel","Africa/Lagos","operator-test"])
+    assert pg.execute("SELECT status FROM worthkind_flow.properties WHERE id=%s",(prop,)).fetchone()[0]=="pending"
+    run_command(dsn,"identity",["idp:hotel-new-staff","operator-test","verified-evidence-001"])
+    run_command(dsn,"activate",["hotel-new","idp:hotel-new-owner","operator-test","verified-evidence-002"])
+    owner=auth_header(signed_token(key,"idp:hotel-new-owner"))
+    other=auth_header(signed_token(key,"idp:hotel-b-reception"))
+    path="/api/v1/properties/hotel-new/staff/settings"
+    assert client.get(path,headers=other).status_code==403
+    response=client.get(path,headers=owner)
+    assert response.status_code==200, response.text
+    assert response.json()=={"guest_enquiries_enabled":True,"ai_enabled":False,"revision":1}
+    assert client.put(path,json={"revision":1,"guest_enquiries_enabled":False},headers=owner).status_code==200
+    assert client.put(path,json={"revision":1,"guest_enquiries_enabled":True},headers=owner).status_code==409
+    guest={"request_key":"new-hotel-request-001","kind":"booking","name":"Test Guest","contact":"test@example.invalid","details":"A test enquiry for the new hotel.","receipt_token":"x"*43}
+    url="/api/v1/properties/hotel-new/enquiries"
+    assert client.post(url,json=guest).status_code==404
+    assert client.put(path,json={"revision":2,"guest_enquiries_enabled":True},headers=owner).status_code==200
+    assert client.post(url,json=guest).status_code==201
+    assert pg.execute("SELECT count(*) FROM worthkind_flow.property_admin_events WHERE property_id=%s",(prop,)).fetchone()[0]==4
+
+
+def test_guest_quota_is_atomic_and_scoped(pg, seeded):
+    dsn=make_conninfo(os.environ["WF_TEST_POSTGRES_DSN"],user="wf_ci_quota",password="worthkind_ci_quota_only")
+    with psycopg.connect(dsn) as conn:
+        with conn.transaction():
+            conn.execute("SET LOCAL ROLE wf_guest_quota")
+            query="SELECT worthkind_flow.consume_guest_quota(%s,%s)"
+            assert all(conn.execute(query,("hotel-a","a"*64)).fetchone()[0] for _ in range(60))
+            assert not conn.execute(query,("hotel-a","a"*64)).fetchone()[0]
+            assert conn.execute(query,("hotel-b","a"*64)).fetchone()[0]
+            assert conn.execute(query,("hotel-a","b"*64)).fetchone()[0]
+
+
+def test_private_document_database_boundary(pg, oidc_rig, monkeypatch):
+    client,key,source=oidc_rig
+    monkeypatch.setenv("WF_DOCUMENT_POSTGRES_DSN",os.environ["WF_STAFF_POSTGRES_DSN"])
+    owner=auth_header(signed_token(key,"idp:hotel-a-owner"))
+    other=auth_header(signed_token(key,"idp:hotel-b-reception"))
+    path="/api/v1/properties/hotel-a/staff/documents"
+    payload=b"synthetic hotel document"
+    response=client.post(path,content=payload,headers=owner)
+    assert response.status_code==201,response.text
+    doc=response.json()["document_id"]
+    assert client.get(path+"/"+doc,headers=owner).content==payload
+    assert client.get(path+"/"+doc,headers=other).status_code==403
+    stored=pg.execute("SELECT ciphertext FROM worthkind_flow.private_documents WHERE id=%s",(doc,)).fetchone()[0]
+    assert payload not in stored
+
+
+def test_postgres_ticket_department_boundary(pg, oidc_rig, monkeypatch):
+    client,key,source=oidc_rig
+    monkeypatch.setenv("WF_OPERATIONS_POSTGRES_DSN",os.environ["WF_STAFF_POSTGRES_DSN"])
+    owner=auth_header(signed_token(key,"idp:hotel-a-owner"))
+    housekeeping=auth_header(signed_token(key,"idp:hotel-a-housekeeper"))
+    outsider=auth_header(signed_token(key,"idp:hotel-b-reception"))
+    base="/api/v1/properties/hotel-a/staff/tickets"
+    body={"request_key":"test-ticket-123","category":"housekeeping","priority":"high","subject":"Room service task","description":"Prepare a room for guest arrival"}
+    r=client.post(base,json=body,headers=owner)
+    assert r.status_code==201,r.text
+    tid=r.json()["ticket_id"]
+    assert client.post(base,json=body,headers=owner).json()["duplicate"] is True
+    assert client.get(base,headers=outsider).status_code==403
+    assert client.get(base,headers=housekeeping).json()["tickets"][0]["id"]==tid
+    route=base+"/"+tid+"/transition"
+    assert client.post(route,json={"action":"claim"},headers=housekeeping).status_code==200
+    assert client.post(route,json={"action":"start"},headers=owner).status_code==409
+    assert client.post(route,json={"action":"start"},headers=housekeeping).status_code==200
+    assert client.post(route,json={"action":"resolve","note":"Task completed"},headers=housekeeping).json()["status"]=="resolved"
+    assert pg.execute("SELECT count(*) FROM worthkind_flow.ticket_events WHERE ticket_id=%s",(tid,)).fetchone()[0]==4
+
+
+def test_content_approval_and_publication_boundary(pg, oidc_rig, monkeypatch):
+    client,key,source=oidc_rig
+    monkeypatch.setenv("WF_OPERATIONS_POSTGRES_DSN",os.environ["WF_STAFF_POSTGRES_DSN"])
+    monkeypatch.setenv("WF_PUBLIC_CONTENT_POSTGRES_DSN",os.environ["WF_GUEST_POSTGRES_DSN"])
+    owner=auth_header(signed_token(key,"idp:hotel-a-owner"))
+    reception=auth_header(signed_token(key,"idp:hotel-a-reception"))
+    outsider=auth_header(signed_token(key,"idp:hotel-b-reception"))
+    path="/api/v1/properties/hotel-a/staff/content"
+    public="/api/v1/properties/hotel-a/content"
+    draft=client.post(path,json={"key":"checkin","title":"Check in","body":"Check in after 2 PM","source_reference":"Hotel policy 2026"},headers=reception)
+    assert draft.status_code==201,draft.text
+    assert client.get(public).json()["content"]==[]
+    decision=path+"/"+draft.json()["id"]+"/decision"
+    assert client.post(decision,json={"action":"publish"},headers=reception).status_code==403
+    assert client.post(decision,json={"action":"publish"},headers=outsider).status_code==403
+    assert client.post(decision,json={"action":"publish"},headers=owner).status_code==200
+    assert client.get(public).json()["content"][0]["content"]["body"]=="Check in after 2 PM"
+    assert client.get("/api/v1/properties/hotel-b/content").json()["content"]==[]
+    assert client.post(decision,json={"action":"withdraw"},headers=owner).status_code==200
+    assert client.get(public).json()["content"]==[]
+
+
+def test_room_catalog_and_housekeeping_authority(pg, oidc_rig, monkeypatch):
+    client,key,source=oidc_rig
+    monkeypatch.setenv("WF_OPERATIONS_POSTGRES_DSN",os.environ["WF_STAFF_POSTGRES_DSN"])
+    monkeypatch.setenv("WF_PUBLIC_CONTENT_POSTGRES_DSN",os.environ["WF_GUEST_POSTGRES_DSN"])
+    owner=auth_header(signed_token(key,"idp:hotel-a-owner"))
+    house=auth_header(signed_token(key,"idp:hotel-a-housekeeper"))
+    other=auth_header(signed_token(key,"idp:hotel-b-reception"))
+    base="/api/v1/properties/hotel-a"
+    body={"code":"standard","name":"Standard room","max_guests":2,"published":True,"revision":0}
+    r=client.put(base+"/staff/room-types",json=body,headers=owner)
+    assert r.status_code==200,r.text
+    tid=r.json()["id"]
+    assert client.put(base+"/staff/room-types",json=body,headers=house).status_code==403
+    r=client.post(base+"/staff/rooms",json={"room_type_id":tid,"label":"101"},headers=owner)
+    assert r.status_code==201,r.text
+    room=r.json()["id"]
+    assert client.put(base+"/staff/rooms/"+room+"/state",json={"state":"out_of_service","revision":1},headers=house).status_code==403
+    assert client.put(base+"/staff/rooms/"+room+"/state",json={"state":"clean","revision":1},headers=house).status_code==200
+    assert client.put(base+"/staff/rooms/"+room+"/state",json={"state":"dirty","revision":1},headers=house).status_code==409
+    assert client.get(base+"/staff/rooms",headers=other).status_code==403
+    r=client.put(base+"/staff/display-rates",json={"room_type_id":tid,"code":"rack","currency":"NGN","amount_minor":2500000,"start_date":"2026-01-01","end_date":"2099-01-01","revision":0},headers=owner)
+    assert r.status_code==200,r.text
+    data=client.get(base+"/rooms").json()
+    assert data["rooms"][0]["display_rates"][0]["amount_minor"]==2500000
+    assert data["live_availability"] is False and data["rates_binding"] is False
+    assert client.get("/api/v1/properties/hotel-b/rooms").json()["rooms"]==[]
+
+
+def test_stock_receiving_idempotency_and_tenant_scope(pg, oidc_rig, monkeypatch):
+    client,key,source=oidc_rig
+    monkeypatch.setenv("WF_OPERATIONS_POSTGRES_DSN",os.environ["WF_STAFF_POSTGRES_DSN"])
+    owner=auth_header(signed_token(key,"idp:hotel-a-owner"))
+    outsider=auth_header(signed_token(key,"idp:hotel-b-reception"))
+    base="/api/v1/properties/hotel-a/staff"
+    item=client.post(base+"/stock/items",json={"sku":"rice","name":"Rice","unit":"kg"},headers=owner)
+    assert item.status_code==201,item.text
+    iid=item.json()["id"]
+    supplier=client.post(base+"/suppliers",json={"name":"Test supplier","external_reference":"test-supplier"},headers=owner)
+    assert supplier.status_code==201,supplier.text
+    sid=supplier.json()["id"]
+    assert client.put(base+"/suppliers/"+sid+"/state",json={"state":"approved"},headers=owner).status_code==200
+    po=client.post(base+"/purchase-orders",json={"supplier_id":sid,"item_id":iid,"quantity":"10","unit_price_minor":1000,"currency":"NGN","request_key":"purchase-test-1"},headers=owner)
+    assert po.status_code==201,po.text
+    oid=po.json()["id"]
+    assert client.post(base+"/purchase-orders/"+oid+"/decision",json={"action":"approve"},headers=owner).status_code==200
+    movement={"item_id":iid,"order_id":oid,"quantity_delta":"4","reason":"Partial receipt","request_key":"receive-test-1"}
+    assert client.post(base+"/stock/movements",json=movement,headers=outsider).status_code==403
+    assert client.post(base+"/stock/movements",json=movement,headers=owner).status_code==201
+    assert client.post(base+"/stock/movements",json=movement,headers=owner).json()["duplicate"] is True
+    movement.update(quantity_delta="7",request_key="receive-test-2")
+    assert client.post(base+"/stock/movements",json=movement,headers=owner).status_code==409
+    movement.update(quantity_delta="6")
+    assert client.post(base+"/stock/movements",json=movement,headers=owner).status_code==201
+    report=client.get(base+"/procurement",headers=owner).json()
+    assert report["items"][0]["balance"]==10
+    assert report["orders"][0]["state"]=="received"
+
+
+def test_dining_order_price_and_kitchen_transitions(pg, oidc_rig, monkeypatch):
+    client,key,source=oidc_rig
+    monkeypatch.setenv("WF_OPERATIONS_POSTGRES_DSN",os.environ["WF_STAFF_POSTGRES_DSN"])
+    monkeypatch.setenv("WF_PUBLIC_CONTENT_POSTGRES_DSN",os.environ["WF_GUEST_POSTGRES_DSN"])
+    owner=auth_header(signed_token(key,"idp:hotel-a-owner"))
+    other=auth_header(signed_token(key,"idp:hotel-b-reception"))
+    reception=auth_header(signed_token(key,"idp:hotel-a-reception"))
+    base="/api/v1/properties/hotel-a"
+    m=client.put(base+"/staff/menu",json={"code":"meal","name":"Meal","price_minor":2500,"currency":"NGN","available":True,"revision":0},headers=owner)
+    assert m.status_code==200,m.text
+    item=m.json()["id"]
+    route=base+"/staff/dining/orders"
+    order={"request_key":"food-test-001","lines":[{"item_id":item,"quantity":2}]}
+    r=client.post(route,json=order,headers=reception)
+    assert r.status_code==201,r.text
+    assert r.json()["total_minor"]==5000 and r.json()["payment_confirmed"] is False
+    oid=r.json()["id"]
+    assert client.post(route,json=order,headers=reception).json()["duplicate"] is True
+    transition=route+"/"+oid+"/transition"
+    assert client.post(transition,json={"action":"accept"},headers=reception).status_code==403
+    assert client.post(transition,json={"action":"accept"},headers=other).status_code==403
+    for action,state in (("accept","accepted"),("prepare","preparing"),("ready","ready"),("serve","served")):
+        r=client.post(transition,json={"action":action},headers=owner)
+        assert r.status_code==200,r.text
+        assert r.json()["state"]==state
+    assert client.get(route,headers=owner).json()["orders"][0]["state"]=="served"
+
+
+def test_staff_schedule_permissions_and_overlap(pg, oidc_rig, monkeypatch):
+    client,key,source=oidc_rig
+    monkeypatch.setenv("WF_OPERATIONS_POSTGRES_DSN",os.environ["WF_STAFF_POSTGRES_DSN"])
+    owner=auth_header(signed_token(key,"idp:hotel-a-owner"))
+    reception=auth_header(signed_token(key,"idp:hotel-a-reception"))
+    other=auth_header(signed_token(key,"idp:hotel-b-reception"))
+    base="/api/v1/properties/hotel-a/staff"
+    member=str(pg.execute("SELECT m.id FROM worthkind_flow.staff_memberships m JOIN worthkind_flow.staff_identities i ON i.id=m.identity_id WHERE i.provider_subject='idp:hotel-a-reception'").fetchone()[0])
+    assert client.put(base+"/profiles/"+member,json={"display_name":"Staff Member","job_title":"Reception","employee_reference":"staff-001"},headers=owner).status_code==200
+    body={"membership_id":member,"starts_at":"2026-12-01T08:00:00+01:00","ends_at":"2026-12-01T16:00:00+01:00"}
+    r=client.post(base+"/shifts",json=body,headers=owner)
+    assert r.status_code==201,r.text
+    sid=r.json()["id"]
+    assert client.post(base+"/shifts",json=body,headers=owner).status_code==409
+    query={"start":"2026-12-01T00:00:00+01:00","end":"2026-12-02T00:00:00+01:00"}
+    assert client.get(base+"/schedule",params=query,headers=other).status_code==403
+    report=client.get(base+"/schedule",params=query,headers=reception).json()
+    assert len(report["members"])==1 and len(report["shifts"])==1
+    assert client.post(base+"/shifts/"+sid+"/cancel",headers=reception).status_code==403
+    assert client.post(base+"/shifts/"+sid+"/cancel",headers=owner).status_code==200
+
+
+def test_guest_receipt_preferences_and_reservation_intent(pg, oidc_rig, monkeypatch):
+    from datetime import date,timedelta
+    client,key,source=oidc_rig
+    monkeypatch.setenv("WF_OPERATIONS_POSTGRES_DSN",os.environ["WF_STAFF_POSTGRES_DSN"])
+    token="g"*43
+    base="/api/v1/properties/hotel-a"
+    payload={"request_key":"booking-stay-test","kind":"booking","name":"Test Guest","contact":"test@example.invalid","details":"Request a two night stay","receipt_token":token}
+    created=client.post(base+"/enquiries",json=payload)
+    assert created.status_code==201,created.text
+    case=created.json()["case_id"]
+    g=base+"/guest/cases/"+case
+    proof={"x-receipt-token":token}
+    assert client.put(g+"/preferences",json={"language":"English","revision":0},headers={"x-receipt-token":"x"*43}).status_code==404
+    assert client.put(g+"/preferences",json={"language":"English","revision":0},headers=proof).status_code==200
+    assert client.get(g+"/preferences",headers=proof).json()["preferences"]["language"]=="English"
+    assert client.post(g+"/consent",json={"purpose":"marketing","granted":False,"policy_version":"test-policy"},headers=proof).status_code==201
+    arrival=date.today()+timedelta(days=10)
+    stay={"request_key":"stay-test-001","arrival":arrival.isoformat(),"departure":(arrival+timedelta(days=2)).isoformat(),"adults":2}
+    r=client.post(g+"/reservation-intents",json=stay,headers=proof)
+    assert r.status_code==201,r.text
+    assert r.json()["booking_confirmed"] is False
+    iid=r.json()["id"]
+    assert client.post(g+"/reservation-intents",json=stay,headers=proof).json()["duplicate"] is True
+    owner=auth_header(signed_token(key,"idp:hotel-a-owner"))
+    review=base+"/staff/reservation-intents/"+iid+"/review"
+    assert client.post(review,json={"action":"review"},headers=owner).json()["state"]=="under_review"
+    assert client.post(g+"/reservation-intents/"+iid+"/withdraw",headers=proof).json()["state"]=="withdrawn"
+    assert client.post(g+"/feedback",json={"rating":4,"comment":"Test feedback"},headers=proof).status_code==409
+
+
+def test_invoice_and_payment_verification_contract_disposable(pg, oidc_rig, monkeypatch):
+    # This fixture is restricted to the disposable worthkind_ci database.
+    # No PSP network call, charge, settlement or transfer occurs.
+    client,key,source=oidc_rig
+    monkeypatch.setenv("WF_OPERATIONS_POSTGRES_DSN",os.environ["WF_STAFF_POSTGRES_DSN"])
+    owner=auth_header(signed_token(key,"idp:hotel-a-owner"))
+    base="/api/v1/properties/hotel-a/staff"
+    item=client.put(base+"/menu",json={"code":"meal","name":"Meal","price_minor":2500,"currency":"NGN","available":True,"revision":0},headers=owner).json()["id"]
+    order=client.post(base+"/dining/orders",json={"request_key":"invoice-food-test","lines":[{"item_id":item,"quantity":2}]},headers=owner).json()["id"]
+    for action in ("accept","prepare","ready","serve"):
+        assert client.post(base+"/dining/orders/"+order+"/transition",json={"action":action},headers=owner).status_code==200
+    inv=client.post(base+"/finance/invoices",json={"dining_order_id":order},headers=owner)
+    assert inv.status_code==201,inv.text
+    iid=inv.json()["id"]
+    assert client.post(base+"/finance/invoices",json={"dining_order_id":order},headers=owner).json()["id"]==iid
+    assert client.post(base+"/finance/invoices/"+iid+"/checkout",json={"email":"test@example.invalid"},headers=owner).status_code==503
+    report=client.get(base+"/finance",headers=owner).json()
+    assert report["invoices"][0]["amount_minor"]==5000
+    assert report["invoices"][0]["state"]=="issued"
+    assert report["payments"]==[]
+
+
+def test_department_publication_and_event_conflict_disposable(pg, oidc_rig, monkeypatch):
+    from datetime import datetime,timedelta,timezone,date
+    client,key,source=oidc_rig
+    monkeypatch.setenv("WF_OPERATIONS_POSTGRES_DSN",os.environ["WF_STAFF_POSTGRES_DSN"])
+    monkeypatch.setenv("WF_PUBLIC_CONTENT_POSTGRES_DSN",os.environ["WF_GUEST_POSTGRES_DSN"])
+    owner=auth_header(signed_token(key,"idp:hotel-a-owner"))
+    reception=auth_header(signed_token(key,"idp:hotel-a-reception"))
+    base="/api/v1/properties/hotel-a"
+    venue=client.post(base+"/staff/venues",json={"name":"Conference hall","capacity":100},headers=owner).json()["id"]
+    token="v"*43
+    case=client.post(base+"/enquiries",json={"request_key":"venue-test-case","kind":"events","name":"Test Guest","contact":"test@example.invalid","details":"Request a conference venue","receipt_token":token}).json()["case_id"]
+    starts=datetime.now(timezone.utc)+timedelta(days=3)
+    payload={"venue_id":venue,"starts_at":starts.isoformat(),"ends_at":(starts+timedelta(hours=4)).isoformat(),"attendance":50,"request_key":"venue-test-001"}
+    path=base+"/guest/cases/"+case+"/venue-requests"
+    r=client.post(path,json=payload,headers={"x-receipt-token":token})
+    assert r.status_code==201,r.text
+    first=r.json()["id"]
+    payload["request_key"]="venue-test-002"
+    second=client.post(path,json=payload,headers={"x-receipt-token":token}).json()["id"]
+    for rid in (first,second):
+        assert client.post(base+"/staff/venue-requests/"+rid+"/decision",json={"action":"review"},headers=owner).status_code==200
+    assert client.post(base+"/staff/venue-requests/"+first+"/decision",json={"action":"accept"},headers=owner).status_code==200
+    assert client.post(base+"/staff/venue-requests/"+second+"/decision",json={"action":"accept"},headers=owner).status_code==409
+    vacancy={"title":"Kitchen assistant","description":"Prepare ingredients for hotel kitchen","deadline":(date.today()+timedelta(days=30)).isoformat()}
+    v=client.post(base+"/staff/vacancies",json=vacancy,headers=owner)
+    assert v.status_code==201,v.text
+    assert client.get(base+"/vacancies").json()["vacancies"]==[]
+    assert client.post(base+"/staff/vacancies/"+v.json()["id"]+"/decision",json={"action":"publish"},headers=owner).status_code==200
+    assert len(client.get(base+"/vacancies").json()["vacancies"])==1
+    assert client.get(base+"/staff/applications",headers=reception).status_code==403
+
+
+def test_native_hold_confirm_and_atomic_change(pg, oidc_rig, monkeypatch):
+    from datetime import date,timedelta
+    client,key,source=oidc_rig
+    monkeypatch.setenv("WF_OPERATIONS_POSTGRES_DSN",os.environ["WF_STAFF_POSTGRES_DSN"])
+    monkeypatch.setenv("WF_PUBLIC_CONTENT_POSTGRES_DSN",os.environ["WF_GUEST_POSTGRES_DSN"])
+    owner=auth_header(signed_token(key,"idp:hotel-a-owner"))
+    base="/api/v1/properties/hotel-a"
+    typ=client.put(base+"/staff/room-types",json={"code":"native","name":"Native room","max_guests":2,"published":True,"revision":0},headers=owner).json()["id"]
+    room=client.post(base+"/staff/rooms",json={"room_type_id":typ,"label":"native-101"},headers=owner).json()["id"]
+    assert client.put(base+"/staff/rooms/"+room+"/state",json={"state":"clean","revision":1},headers=owner).status_code==200
+    pg.execute("SELECT worthkind_flow.configure_native_bookings(%s,%s,%s)",("hotel-a","disposable inventory proof",True))
+    start=date.today()+timedelta(days=10)
+    policy="Disposable pay at property terms"
+    rate=client.put(base+"/staff/bookable-rates",json={"room_type_id":typ,"code":"flex","currency":"NGN","nightly_total_minor":2500000,"start_date":start.isoformat(),"end_date":(start+timedelta(days=30)).isoformat(),"policy_reference":policy,"revision":0},headers=owner)
+    assert rate.status_code==200,rate.text
+    rate=rate.json()["id"]
+    token="n"*43
+    case=client.post(base+"/enquiries",json={"request_key":"native-case-test","kind":"booking","name":"Test Guest","contact":"test@example.invalid","details":"Native room request","receipt_token":token}).json()["case_id"]
+    guest=base+"/guest/cases/"+case
+    headers={"x-receipt-token":token}
+    intent=client.post(guest+"/reservation-intents",json={"request_key":"native-stay-test","room_type_id":typ,"arrival":start.isoformat(),"departure":(start+timedelta(days=2)).isoformat(),"adults":2},headers=headers).json()["id"]
+    assert client.post(base+"/staff/reservation-intents/"+intent+"/review",json={"action":"review"},headers=owner).status_code==200
+    hold=client.post(base+"/staff/native-bookings/holds",json={"intent_id":intent,"room_type_id":typ,"rate_id":rate,"request_key":"native-hold-test"},headers=owner)
+    assert hold.status_code==201,hold.text
+    booking=hold.json()["id"]
+    assert hold.json()["total_minor"]==5000000
+    route=guest+"/native-bookings/"+booking
+    assert client.post(route+"/confirm",json={"expected_total_minor":5000000,"payment_method":"pay_at_property","accept_terms":True},headers={"x-receipt-token":"x"*43}).status_code==404
+    result=client.post(route+"/confirm",json={"expected_total_minor":5000000,"payment_method":"pay_at_property","accept_terms":True},headers=headers)
+    assert result.status_code==200,result.text
+    change={"revision":2,"arrival":(start+timedelta(days=2)).isoformat(),"departure":(start+timedelta(days=5)).isoformat(),"rate_id":rate,"expected_total_minor":7500000,"expected_currency":"NGN","policy_reference":policy,"accept_terms":True}
+    result=client.post(route+"/change-dates",json=change,headers=headers)
+    assert result.status_code==200,result.text
+    assert result.json()["booking"]["total_minor"]==7500000
+    assert client.post(base+"/staff/native-bookings/"+booking+"/cancel",json={"revision":3,"reason":"Disposable cancellation"},headers=owner).status_code==200
+
+
+def test_purchase_batch_replay_and_approval(pg, oidc_rig, monkeypatch):
+    client,key,source=oidc_rig
+    monkeypatch.setenv("WF_OPERATIONS_POSTGRES_DSN",os.environ["WF_STAFF_POSTGRES_DSN"])
+    owner=auth_header(signed_token(key,"idp:hotel-a-owner"))
+    base="/api/v1/properties/hotel-a/staff"
+    items=[]
+    for sku in ("batch-rice","batch-oil"):
+        r=client.post(base+"/stock/items",json={"sku":sku,"name":sku,"unit":"kg"},headers=owner)
+        assert r.status_code==201,r.text
+        items.append(r.json()["id"])
+    supplier=client.post(base+"/suppliers",json={"name":"Batch supplier","external_reference":"batch-supplier"},headers=owner).json()["id"]
+    assert client.put(base+"/suppliers/"+supplier+"/state",json={"state":"approved"},headers=owner).status_code==200
+    body={"supplier_id":supplier,"currency":"NGN","request_key":"batch-test-001","lines":[{"item_id":i,"quantity":"10","unit_price_minor":1000} for i in items]}
+    r=client.post(base+"/purchase-batches",json=body,headers=owner)
+    assert r.status_code==201,r.text
+    batch=r.json()["id"]
+    body["lines"].reverse()
+    assert client.post(base+"/purchase-batches",json=body,headers=owner).json()["id"]==batch
+    assert client.post(base+"/purchase-batches/"+batch+"/decision",json={"action":"approve"},headers=owner).status_code==200
+    data=client.get(base+"/purchase-batches",headers=owner).json()["batches"]
+    assert len(data[0]["lines"])==2 and all(x["state"]=="approved" for x in data[0]["lines"])
+
+
+def test_partial_refund_balance_reservation_in_disposable_db(pg, oidc_rig, monkeypatch):
+    # Database-only synthetic evidence, never a network payment or refund.
+    client,key,source=oidc_rig
+    monkeypatch.setenv("WF_OPERATIONS_POSTGRES_DSN",os.environ["WF_STAFF_POSTGRES_DSN"])
+    owner=auth_header(signed_token(key,"idp:hotel-a-owner"))
+    base="/api/v1/properties/hotel-a/staff"
+    item=client.put(base+"/menu",json={"code":"refund-test","name":"Test item","price_minor":5000,"currency":"NGN","available":True,"revision":0},headers=owner)
+    assert item.status_code==200,item.text
+    order=client.post(base+"/dining/orders",json={"request_key":"refund-order-test","lines":[{"item_id":item.json()["id"],"quantity":2}]},headers=owner)
+    assert order.status_code==201,order.text
+    oid=order.json()["id"]
+    for action in ("accept","prepare","ready","serve"):
+        assert client.post(base+"/dining/orders/"+oid+"/transition",json={"action":action},headers=owner).status_code==200
+    invoice=client.post(base+"/finance/invoices",json={"dining_order_id":oid},headers=owner)
+    assert invoice.status_code==201,invoice.text
+    iid=invoice.json()["id"]
+    pg.execute("SELECT worthkind_flow.configure_hotel_payments('hotel-a','disposable-refund-test','test','disposable provider fixture',true)")
+    payment=pg.execute("SELECT * FROM worthkind_flow.begin_hotel_payment('idp:hotel-a-owner','hotel-a',%s)",(iid,)).fetchone()
+    pid,ref=payment[:2]
+    assert pg.execute("SELECT worthkind_flow.record_verified_payment('hotel-a',%s,'disposable-refund-test','test',1234567,10000,'NGN')",(ref,)).fetchone()[0]=="verified"
+    req={"payment_id":str(pid),"reason":"Disposable partial refund test","amount_minor":4000,"request_key":"refund-test-001"}
+    r=client.post(base+"/finance/refunds",json=req,headers=owner)
+    assert r.status_code==201,r.text
+    rid=r.json()["id"]
+    assert client.post(base+"/finance/refunds",json=req,headers=owner).json()["id"]==rid
+    req.update(amount_minor=7000,request_key="refund-test-002")
+    assert client.post(base+"/finance/refunds",json=req,headers=owner).status_code==409
+    req.update(amount_minor=6000)
+    assert client.post(base+"/finance/refunds",json=req,headers=owner).status_code==201
+    report=client.get(base+"/finance",headers=owner).json()
+    assert report["invoices"][0]["state"]=="test_verified"
+    assert sum(x["amount_minor"] for x in report["refunds"])==10000
+
+
+def test_stay_arrival_checkout_and_folio(pg, oidc_rig, monkeypatch):
+    from datetime import timedelta
+    client,key,source=oidc_rig
+    monkeypatch.setenv("WF_OPERATIONS_POSTGRES_DSN",os.environ["WF_STAFF_POSTGRES_DSN"])
+    owner=auth_header(signed_token(key,"idp:hotel-a-owner"))
+    outsider=auth_header(signed_token(key,"idp:hotel-b-reception"))
+    slug="hotel-a"
+    subject="idp:hotel-a-owner"
+    base="/api/v1/properties/"+slug+"/staff/native-bookings/"
+    today=pg.execute("SELECT (now() AT TIME ZONE time_zone)::date FROM worthkind_flow.properties WHERE slug=%s",(slug,)).fetchone()[0]
+    typ=pg.execute("SELECT id FROM worthkind_flow.manage_room_type(%s,%s,'stay','Stay room','',2,true,0)",(subject,slug)).fetchone()[0]
+    room=pg.execute("SELECT worthkind_flow.create_room(%s,%s,%s,'stay-101')",(subject,slug,typ)).fetchone()[0]
+    pg.execute("SELECT worthkind_flow.change_room_state(%s,%s,%s,'clean',1)",(subject,slug,room))
+    pg.execute("SELECT worthkind_flow.configure_native_bookings(%s,'disposable inventory proof',true)",(slug,))
+    rate=pg.execute("SELECT id FROM worthkind_flow.save_bookable_rate(%s,%s,%s,'flex','NGN',2000000,%s,%s,'disposable pay at property',true,0)",(subject,slug,typ,today,today+timedelta(days=30))).fetchone()[0]
+    cid=pg.execute("SELECT case_id FROM worthkind_flow.create_guest_case(%s,'stay-case-001',repeat('a',64),repeat('b',64),'booking')",(slug,)).fetchone()[0]
+    intent=pg.execute("SELECT id FROM worthkind_flow.request_reservation(%s,%s,repeat('b',64),%s,%s,%s,2,0,1,'stay-intent-001')",(slug,cid,typ,today,today+timedelta(days=2))).fetchone()[0]
+    pg.execute("SELECT worthkind_flow.review_reservation_intent(%s,%s,%s,'review')",(subject,slug,intent))
+    hold=pg.execute("SELECT worthkind_flow.hold_native_booking(%s,%s,%s,%s,%s,'stay-hold-001')",(subject,slug,intent,typ,rate)).fetchone()[0]
+    booking=hold["id"]
+    pg.execute("SELECT worthkind_flow.confirm_native_booking(%s,%s,repeat('b',64),%s,4000000)",(slug,cid,booking))
+    route=base+booking
+    assert client.post(route+"/stay",json={"action":"check_in","revision":0},headers=outsider).status_code==403
+    r=client.post(route+"/stay",json={"action":"check_in","revision":0},headers=owner)
+    assert r.status_code==200,r.text
+    assert r.json()["stay"]["state"]=="checked_in"
+    assert pg.execute("SELECT count(*) FROM worthkind_flow.occupied_rooms WHERE room_id=%s",(room,)).fetchone()[0]==1
+    assert client.post(route+"/cancel",json={"revision":2,"reason":"Disposable cancellation"},headers=owner).status_code==409
+    r=client.post(route+"/stay",json={"action":"check_out","revision":1,"note":"Guest departed normally"},headers=owner)
+    assert r.status_code==200,r.text
+    assert r.json()["stay"]["state"]=="checked_out"
+    assert pg.execute("SELECT operational_state FROM worthkind_flow.hotel_rooms WHERE id=%s",(room,)).fetchone()[0]=="dirty"
+    assert pg.execute("SELECT count(*) FROM worthkind_flow.occupied_rooms WHERE room_id=%s",(room,)).fetchone()[0]==0
+    assert client.get(route+"/folio",headers=owner).json()["stay"]["state"]=="checked_out"
+
+
+def test_pms_command_replay_and_intent_guard(pg, seeded):
+    from datetime import timedelta
+    subject="idp:hotel-a-owner"
+    slug="hotel-a"
+    today=pg.execute("SELECT current_date").fetchone()[0]
+    typ=pg.execute("SELECT id FROM worthkind_flow.manage_room_type(%s,%s,'pms','PMS room','',2,true,0)",(subject,slug)).fetchone()[0]
+    pg.execute("SELECT worthkind_flow.configure_cloudbeds(%s,'property-ci','account-ci','disposable PMS configuration',true)",(slug,))
+    cid=pg.execute("SELECT case_id FROM worthkind_flow.create_guest_case(%s,'pms-case-001',repeat('a',64),repeat('b',64),'booking')",(slug,)).fetchone()[0]
+    intent=pg.execute("SELECT id FROM worthkind_flow.request_reservation(%s,%s,repeat('b',64),%s,%s,%s,2,0,1,'pms-intent-001')",(slug,cid,typ,today+timedelta(days=3),today+timedelta(days=5))).fetchone()[0]
+    pg.execute("SELECT worthkind_flow.review_reservation_intent(%s,%s,%s,'review')",(subject,slug,intent))
+    args=(subject,slug,intent)
+    q="SELECT worthkind_flow.begin_pms_command(%s,%s,'create','pms-command-001',repeat('a',64),%s,NULL)"
+    first=pg.execute(q,args).fetchone()[0]
+    assert first["submit"] is True
+    assert pg.execute("SELECT worthkind_flow.check_pms_command_payload(%s,%s,%s,repeat(\x27a\x27,64))",(subject,slug,first["id"])).fetchone()[0] is True
+    assert pg.execute("SELECT worthkind_flow.check_pms_command_payload(%s,%s,%s,repeat(\x27b\x27,64))",(subject,slug,first["id"])).fetchone()[0] is False
+    pg.execute("SELECT worthkind_flow.configure_cloudbeds(%s,'property-ci','account-ci','disposable PMS configuration',false)",(slug,))
+    assert not pg.execute("SELECT enabled FROM worthkind_flow.pms_accounts a JOIN worthkind_flow.properties p ON p.id=a.property_id WHERE p.slug=%s",(slug,)).fetchone()[0]
+    with pytest.raises(errors.CheckViolation):
+        pg.execute("INSERT INTO worthkind_flow.native_booking_accounts(property_id,approval_reference,enabled) SELECT id,'disposable inventory',true FROM worthkind_flow.properties WHERE slug=%s",(slug,))
+    pg.execute("SELECT worthkind_flow.configure_cloudbeds(%s,'property-ci','account-ci','disposable PMS configuration',true)",(slug,))
+    assert pg.execute(q,args).fetchone()[0]["submit"] is False
+    with pytest.raises(errors.CheckViolation):
+        pg.execute("SELECT worthkind_flow.withdraw_reservation(%s,%s,repeat('b',64),%s)",(slug,cid,intent))
+    with pytest.raises(errors.UniqueViolation):
+        pg.execute("SELECT worthkind_flow.begin_pms_command(%s,%s,'create','pms-command-002',repeat('a',64),%s,NULL)",args)
+    with pytest.raises(errors.InsufficientPrivilege):
+        pg.execute(q,("idp:hotel-b-reception",slug,intent))
+    assert pg.execute("SELECT worthkind_flow.finish_pms_command(%s,%s,%s,'unknown',NULL,NULL,'{}'::jsonb)",(subject,slug,first["id"])).fetchone()[0]["state"]=="unknown"
+    assert pg.execute(q,args).fetchone()[0]["submit"] is False
+
+
+def test_pos_refresh_lease_and_cancelled_receipt(pg, seeded):
+    from datetime import datetime,timezone,timedelta
+    from psycopg.types.json import Jsonb
+    subject="idp:hotel-a-owner"
+    slug="hotel-a"
+    item=pg.execute("SELECT id FROM worthkind_flow.save_menu_item(%s,%s,'pos-meal','Meal','',5000,'NGN',true,0)",(subject,slug)).fetchone()[0]
+    order=pg.execute("SELECT id FROM worthkind_flow.create_dining_order(%s,%s,'pos-order-001',NULL,%s)",(subject,slug,Jsonb([{"item_id":str(item),"quantity":2}]))).fetchone()[0]
+    for action in ("accept","prepare","ready","serve"):
+        pg.execute("SELECT worthkind_flow.transition_dining_order(%s,%s,%s,%s)",(subject,slug,order,action))
+    pg.execute("SELECT worthkind_flow.configure_loyverse(%s,'store-ci','pos-ci','NGN',2,'disposable POS approval',true)",(slug,))
+    created=datetime.now(timezone.utc)
+    ev=pg.execute("SELECT worthkind_flow.record_pos_receipt(%s,%s,%s,'pos-ci','store-ci','receipt-ci',10000,'NGN','SALE',%s,%s)",(subject,slug,order,created,created)).fetchone()[0]
+    assert ev["matched"] is True
+    leased=pg.execute("SELECT * FROM worthkind_flow.lease_pos_refresh(5)").fetchall()
+    assert len(leased)==1
+    eid,lease,*_=leased[0]
+    assert pg.execute("SELECT * FROM worthkind_flow.lease_pos_refresh(5)").fetchall()==[]
+    q="SELECT worthkind_flow.complete_pos_refresh(%s,%s,'pos-ci','store-ci','receipt-ci',10000,'SALE',%s,%s,%s,true)"
+    cancelled=created+timedelta(seconds=1)
+    assert pg.execute(q,(eid,uuid4(),created,cancelled,cancelled)).fetchone()[0] is False
+    assert pg.execute(q,(eid,lease,created,cancelled,cancelled)).fetchone()[0] is True
+    assert pg.execute("SELECT matched,cancelled_at FROM worthkind_flow.pos_receipt_evidence WHERE id=%s",(eid,)).fetchone()==(False,cancelled)
+    assert pg.execute(q,(eid,lease,created,cancelled,cancelled)).fetchone()[0] is False
+    newer=cancelled+timedelta(seconds=1)
+    ev=pg.execute("SELECT worthkind_flow.record_pos_receipt(%s,%s,%s,'pos-ci','store-ci','receipt-ci',10000,'NGN','SALE',%s,%s)",(subject,slug,order,created,newer)).fetchone()[0]
+    assert ev["matched"] is False
+    assert pg.execute("SELECT count(*) FROM worthkind_flow.hotel_payment_intents").fetchone()[0]==0
+
+
+def test_ai_platform_budget_retrieval_snapshot_and_approval(pg, seeded):
+    from psycopg.types.json import Jsonb
+    subject="idp:hotel-a-owner"
+    slug="hotel-a"
+    pg.execute("INSERT INTO worthkind_flow.property_settings(property_id) VALUES(%s)",(seeded["property_a"],))
+    pg.execute("SELECT worthkind_flow.configure_ai_platform(true,6)")
+    try:
+        with pytest.raises(errors.NoDataFound):
+            pg.execute("SELECT worthkind_flow.begin_ai_call(%s,NULL,'guest_chat')",(slug,))
+        pg.execute("SELECT worthkind_flow.approve_ai_provider(%s,true,'disposable approval evidence')",(slug,))
+        ids=[]
+        for key,title,body in (("breakfast","Breakfast","Breakfast served at seven"),("parking","Parking","Parking is free")):
+            cid=pg.execute("SELECT worthkind_flow.draft_content(%s,%s,%s,%s,'disposable source evidence')",(subject,slug,key,Jsonb({"title":title,"body":body}))).fetchone()[0]
+            pg.execute("SELECT worthkind_flow.decide_content(%s,%s,%s,'publish')",(subject,slug,cid))
+            pg.execute("SELECT worthkind_flow.manage_ai_source(%s,%s,%s,true)",(subject,slug,cid))
+            ids.append(cid)
+        policy=pg.execute("SELECT worthkind_flow.manage_ai_policy(%s,%s,NULL,NULL,NULL,NULL,NULL,NULL)",(subject,slug)).fetchone()[0]
+        pg.execute("SELECT worthkind_flow.manage_ai_policy(%s,%s,%s,true,true,true,true,6)",(subject,slug,policy["revision"]))
+        with pytest.raises(errors.InsufficientPrivilege):
+            pg.execute("SELECT worthkind_flow.manage_ai_policy(%s,%s,NULL,NULL,NULL,NULL,NULL,NULL)",("idp:hotel-a-reception",slug))
+        with pg.transaction():
+            pg.execute("SET LOCAL ROLE wf_ai_gateway")
+            cid=pg.execute("SELECT worthkind_flow.begin_ai_call(%s,NULL,'guest_chat')",(slug,)).fetchone()[0]
+            assert pg.execute("SELECT * FROM worthkind_flow.ai_retrieve('hotel-b',%s,'breakfast')",(cid,)).fetchall()==[]
+            result=pg.execute("SELECT * FROM worthkind_flow.ai_retrieve(%s,%s,'breakfast')",(slug,cid)).fetchall()
+            assert [r[0] for r in result]==[ids[0]]
+            assert pg.execute("SELECT * FROM worthkind_flow.ai_retrieve(%s,%s,'parking')",(slug,cid)).fetchall()==[]
+            assert pg.execute("SELECT worthkind_flow.finish_ai_call(%s,%s,'answered',%s)",(slug,cid,[ids[1]])).fetchone()[0] is False
+        with pytest.raises(errors.InsufficientPrivilege):
+            with pg.transaction():
+                pg.execute("SET LOCAL ROLE wf_ai_gateway")
+                pg.execute("SELECT * FROM worthkind_flow.guest_cases")
+        with pytest.raises(errors.InsufficientPrivilege):
+            with pg.transaction():
+                pg.execute("SET LOCAL ROLE wf_ai_gateway")
+                pg.execute("SELECT worthkind_flow.manage_ai_source(%s,%s,%s,true)",(subject,slug,ids[1]))
+        callid=pg.execute("SELECT worthkind_flow.begin_ai_call(%s,NULL,'voice')",(slug,)).fetchone()[0]
+        pg.execute("SELECT * FROM worthkind_flow.ai_retrieve(%s,%s,'breakfast')",(slug,callid))
+        assert pg.execute("SELECT worthkind_flow.finish_ai_call(%s,%s,'answered',%s)",(slug,callid,[ids[0]])).fetchone()[0] is True
+        with pytest.raises(errors.CheckViolation):
+            pg.execute("SELECT worthkind_flow.begin_ai_call(%s,NULL,'voice')",(slug,))
+        callid=pg.execute("SELECT worthkind_flow.begin_ai_call(%s,NULL,'guest_chat')",(slug,)).fetchone()[0]
+        pg.execute("SELECT * FROM worthkind_flow.ai_retrieve(%s,%s,'breakfast')",(slug,callid))
+        pg.execute("SELECT worthkind_flow.manage_ai_source(%s,%s,%s,false)",(subject,slug,ids[0]))
+        assert pg.execute("SELECT worthkind_flow.finish_ai_call(%s,%s,'answered',%s)",(slug,callid,[ids[0]])).fetchone()[0] is False
+        pid=pg.execute("SELECT worthkind_flow.propose_ai_ticket(%s,%s,'ai-disposable-proposal',repeat('a',64),'housekeeping','normal',decode(repeat('ab',40),'hex'))",("idp:hotel-a-housekeeper",slug)).fetchone()[0]
+        assert pg.execute("SELECT count(*) FROM worthkind_flow.service_tickets").fetchone()[0]==0
+        with pytest.raises(errors.InsufficientPrivilege):
+            pg.execute("SELECT worthkind_flow.decide_ai_ticket(%s,%s,%s,true)",("idp:hotel-a-housekeeper",slug,pid))
+        result=pg.execute("SELECT worthkind_flow.decide_ai_ticket(%s,%s,%s,true)",(subject,slug,pid)).fetchone()[0]
+        assert result["state"]=="executed"
+        assert pg.execute("SELECT worthkind_flow.decide_ai_ticket(%s,%s,%s,true)",(subject,slug,pid)).fetchone()[0]==result
+        pg.execute("UPDATE worthkind_flow.service_tickets SET due_at=now()-interval '1 hour' WHERE id=%s",(result["ticket_id"],))
+        with pg.transaction():
+            pg.execute("SET LOCAL ROLE wf_ai_automation")
+            assert pg.execute("SELECT worthkind_flow.scan_ai_alerts(100)").fetchone()[0]==1
+            assert pg.execute("SELECT worthkind_flow.scan_ai_alerts(100)").fetchone()[0]==0
+        assert pg.execute("SELECT count(*) FROM worthkind_flow.ai_internal_alerts").fetchone()[0]==1
+        pg.execute("SELECT worthkind_flow.configure_ai_platform(false,6)")
+        with pytest.raises(errors.NoDataFound):
+            pg.execute("SELECT worthkind_flow.begin_ai_call(%s,NULL,'guest_chat')",(slug,))
+    finally:
+        pg.execute("SELECT worthkind_flow.configure_ai_platform(false,1000)")
+
+
+def test_guest_resolution_requires_receipt_and_current_staff_resolution(pg, seeded):
+    case=seeded["case_a"]
+    owner="idp:hotel-a-owner"
+    read="SELECT worthkind_flow.read_guest_resolution(%s,%s,%s)"
+    decide="SELECT worthkind_flow.decide_guest_resolution(%s,%s,%s,%s,%s)"
+    staff_read="SELECT worthkind_flow.read_staff_resolution(%s,%s,%s)"
+    proof="b"*64
+    def guest_read(slug="hotel-a",receipt=proof):
+        with command_session(pg,"wf_guest_api"):
+            return pg.execute(read,(slug,case,receipt)).fetchone()[0]
+    def guest_decide(resolution,action,slug="hotel-a",receipt=proof):
+        with command_session(pg,"wf_guest_api"):
+            return pg.execute(decide,(slug,case,receipt,resolution,action)).fetchone()[0]
+    def staff_resolve():
+        pg.execute("UPDATE worthkind_flow.guest_cases SET state='responded',assigned_membership_id=%s WHERE id=%s",(seeded["members"]["owner"],case))
+        return pg.execute("SELECT worthkind_flow.control_reception_case(%s,%s,%s,'resolve',NULL,%s)",(owner,"hotel-a",case,bytes(32))).fetchone()[0]
+    assert not guest_read()["guest_confirmed"]
+    with pytest.raises(errors.CheckViolation):
+        guest_decide(uuid4(),"confirm")
+    assert staff_resolve()=="resolved"
+    first=guest_read()
+    assert first["awaiting_guest_confirmation"] and not first["guest_confirmed"]
+    first_id=first["resolution_id"]
+    for slug,receipt in (("hotel-b",proof),("hotel-a","c"*64)):
+        with pytest.raises(errors.NoDataFound):
+            guest_read(slug,receipt)
+        with pytest.raises(errors.NoDataFound):
+            guest_decide(first_id,"confirm",slug,receipt)
+    reopened=guest_decide(first_id,"reopen")
+    assert reopened["current_case_status"]=="queued" and not reopened["duplicate"]
+    assert guest_decide(first_id,"reopen")["duplicate"]
+    with pytest.raises(errors.CheckViolation):
+        guest_decide(first_id,"confirm")
+    assert pg.execute("SELECT assigned_membership_id FROM worthkind_flow.guest_cases WHERE id=%s",(case,)).fetchone()[0] is None
+    assert staff_resolve()=="resolved"
+    second=guest_read()
+    second_id=second["resolution_id"]
+    assert second_id!=first_id and second["awaiting_guest_confirmation"]
+    assert guest_decide(first_id,"reopen")["current_case_status"]=="resolved"
+    assert guest_decide(second_id,"confirm")["decision"]=="confirm"
+    assert guest_decide(second_id,"confirm")["duplicate"]
+    assert guest_read()["guest_confirmed"]
+    with pytest.raises(errors.CheckViolation):
+        guest_decide(second_id,"reopen")
+    with pg.transaction():
+        pg.execute("SET LOCAL ROLE wf_operations")
+        assert pg.execute(staff_read,(owner,"hotel-a",case)).fetchone()[0]["guest_confirmed"]
+    for subject in ("idp:hotel-a-housekeeper","idp:hotel-b-reception","idp:hotel-a-invited","idp:hotel-a-suspended"):
+        with pytest.raises(errors.InsufficientPrivilege):
+            with pg.transaction():
+                pg.execute("SET LOCAL ROLE wf_operations")
+                pg.execute(staff_read,(subject,"hotel-a",case))
+    with pytest.raises(errors.InsufficientPrivilege):
+        with command_session(pg,"wf_guest_api"):
+            pg.execute("SELECT * FROM worthkind_flow.guest_resolution_decisions")
+    assert pg.execute("SELECT count(*) FROM worthkind_flow.event_outbox WHERE case_id=%s AND event_type IN ('guest_case_reopened','guest_resolution_confirmed')",(case,)).fetchone()[0]==2
+
+
+def test_staff_property_discovery_and_revocation(pg, oidc_rig, monkeypatch):
+    client,key,source=oidc_rig
+    monkeypatch.setenv("WF_OPERATIONS_POSTGRES_DSN",os.environ["WF_STAFF_POSTGRES_DSN"])
+    path="/api/v1/staff/properties"
+    def headers(subject):
+        return auth_header(signed_token(key,subject))
+    def get(subject,query=""):
+        response=client.get(path+query,headers=headers(subject))
+        assert response.status_code==200,response.text
+        return response.json()
+    owner="idp:hotel-a-owner"
+    invited="idp:hotel-a-invited"
+    assert client.get(path).status_code==401
+    assert client.get(path,headers=auth_header("bad-token")).status_code==401
+    assert get(owner)["properties"][0]["slug"]=="hotel-a"
+    assert get("idp:hotel-b-reception")["properties"][0]["slug"]=="hotel-b"
+    assert get("idp:hotel-a-housekeeper")["properties"][0]["role"]=="housekeeping"
+    assert get(invited)["properties"][0]["membership_state"]=="invited"
+    assert client.get("/api/v1/properties/hotel-a/staff/tickets",headers=headers(invited)).status_code==403
+    assert get("idp:hotel-a-suspended")["properties"]==[]
+    assert get("idp:unknown-subject")["properties"]==[]
+    pg.execute("INSERT INTO worthkind_flow.staff_memberships(organization_id,property_id,identity_id,role,state,activated_at) VALUES(%s,%s,%s,'reception','active',now())",
+               (source["org_b"],source["property_b"],source["owner"]))
+    first=get(owner,"?limit=1")
+    assert [p["slug"] for p in first["properties"]]==["hotel-a"]
+    assert first["next_cursor"]=="hotel-a"
+    second=get(owner,"?limit=1&after=hotel-a")
+    assert [p["slug"] for p in second["properties"]]==["hotel-b"] and second["next_cursor"] is None
+    pg.execute("UPDATE worthkind_flow.staff_memberships SET state='revoked',revoked_at=now() WHERE id=%s",(source["members"]["owner"],))
+    assert [p["slug"] for p in get(owner)["properties"]]==["hotel-b"]
+    pg.execute("UPDATE worthkind_flow.organizations SET status='suspended' WHERE id=%s",(source["org_b"],))
+    assert get(owner)["properties"]==[]
+    assert get("idp:hotel-b-reception")["properties"]==[]
+    with pytest.raises(errors.InsufficientPrivilege):
+        with command_session(pg,"wf_guest_api"):
+            pg.execute("SELECT * FROM worthkind_flow.list_staff_properties(%s,NULL,10)",(owner,))
+
+
+def test_reception_handover_acknowledgement_and_tenant_boundary(pg, oidc_rig, monkeypatch):
+    client,key,source=oidc_rig
+    monkeypatch.setenv("WF_OPERATIONS_POSTGRES_DSN",os.environ["WF_STAFF_POSTGRES_DSN"])
+    def headers(subject): return auth_header(signed_token(key,subject))
+    owner=headers("idp:hotel-a-owner")
+    reception=headers("idp:hotel-a-reception")
+    outside=headers("idp:hotel-b-reception")
+    housekeeper=headers("idp:hotel-a-housekeeper")
+    base="/api/v1/properties/hotel-a/staff"
+    path=base+"/handovers"
+    recipients=client.get(base+"/handover-recipients",headers=owner)
+    assert recipients.status_code==200,recipients.text
+    assert [r["membership_id"] for r in recipients.json()["recipients"]]==[str(source["members"]["receptionist"])]
+    assert client.get(base+"/handover-recipients",headers=housekeeper).status_code==403
+    body={"recipient_id":str(source["members"]["receptionist"]),"case_id":str(source["case_a"]),"request_key":str(uuid4()),"note":"Guest awaiting reception follow up"}
+    assert client.post(path,json={**body,"case_id":str(source["case_b"])},headers=owner).status_code==404
+    assert client.post(path,json={**body,"recipient_id":str(source["members"]["outsider"])},headers=owner).status_code==404
+    assert client.post(path,json=body,headers=outside).status_code==403
+    r=client.post(path,json=body,headers=owner)
+    assert r.status_code==201,r.text
+    hid=r.json()["id"]
+    assert client.post(path,json=body,headers=owner).json()["duplicate"] is True
+    assert client.post(path,json={**body,"note":"Changed handover note"},headers=owner).status_code==409
+    assert client.get(path,headers=housekeeper).status_code==403
+    assert client.get(path,headers=outside).status_code==403
+    assert client.get(path,headers=reception).json()["handovers"][0]["note"]==body["note"]
+    assert body["note"].encode() not in pg.execute("SELECT encrypted_note FROM worthkind_flow.reception_handovers WHERE id=%s",(hid,)).fetchone()[0]
+    decision=path+"/"+hid+"/decision"
+    assert client.post(decision,json={"action":"acknowledge"},headers=owner).status_code==403
+    assert client.post(decision,json={"action":"cancel"},headers=reception).status_code==403
+    assert client.post(decision,json={"action":"acknowledge"},headers=reception).json()["state"]=="acknowledged"
+    assert client.post(decision,json={"action":"acknowledge"},headers=reception).json()["duplicate"] is True
+    assert client.post(decision,json={"action":"cancel"},headers=owner).status_code==409
+    assert client.get(path,headers=reception).json()["handovers"]==[]
+    assert client.get(path+"?pending=false",headers=owner).json()["handovers"][0]["state"]=="acknowledged"
+    assert pg.execute("SELECT state FROM worthkind_flow.guest_cases WHERE id=%s",(source["case_a"],)).fetchone()[0]=="queued"
+    assert pg.execute("SELECT count(*) FROM worthkind_flow.staff_operation_events WHERE resource_id=%s",(hid,)).fetchone()[0]==2
+    second=client.post(path,json={**body,"request_key":str(uuid4())},headers=owner).json()["id"]
+    pg.execute("UPDATE worthkind_flow.staff_memberships SET state='revoked',revoked_at=now() WHERE id=%s",(source["members"]["receptionist"],))
+    assert client.post(path+"/"+second+"/decision",json={"action":"acknowledge"},headers=reception).status_code==403
+    assert client.post(path+"/"+second+"/decision",json={"action":"cancel"},headers=owner).json()["state"]=="cancelled"
+    with pytest.raises(errors.InsufficientPrivilege):
+        with command_session(pg,"wf_guest_api"):
+            pg.execute("SELECT * FROM worthkind_flow.reception_handovers")
+
+
+def test_management_reports_are_scoped_and_payment_evidence_separates_modes(pg, oidc_rig, monkeypatch):
+    client,key,source=oidc_rig
+    monkeypatch.setenv("WF_OPERATIONS_POSTGRES_DSN",os.environ["WF_STAFF_POSTGRES_DSN"])
+    def headers(subject): return auth_header(signed_token(key,subject))
+    owner=headers("idp:hotel-a-owner")
+    reception=headers("idp:hotel-a-reception")
+    outsider=headers("idp:hotel-b-reception")
+    base="/api/v1/properties/hotel-a/staff/reports"
+    def read(path,auth=owner):
+        response=client.get(base+path,headers=auth)
+        assert response.status_code==200,response.text
+        return response.json()
+    assert client.get(base+"/operations",headers=reception).status_code==403
+    assert client.get(base+"/payment-evidence",headers=outsider).status_code==403
+    assert read("/operations")["cases"]["queued"]==1
+    assert read("/operations")["rooms"]["registered"]==0
+    assert read("/payment-evidence")["groups"]==[]
+    for prop,member,mode,currency,amount,refund,state in [
+        (source["property_a"],source["members"]["owner"],"live","NGN",10000,3000,"verified"),
+        (source["property_a"],source["members"]["owner"],"test","NGN",70000,0,"verified"),
+        (source["property_a"],source["members"]["owner"],"live","USD",100,100,"refunded"),
+        (source["property_a"],source["members"]["owner"],"live","NGN",90000,0,"pending"),
+        (source["property_b"],source["members"]["outsider"],"live","NGN",80000,0,"verified")]:
+        order,invoice,payment=uuid4(),uuid4(),uuid4()
+        pg.execute("INSERT INTO worthkind_flow.dining_orders(id,property_id,request_key,request_payload,created_by,state,currency,total_minor) VALUES(%s,%s,%s,'{}',%s,'served',%s,%s)",(order,prop,str(order),member,currency,amount))
+        pg.execute("INSERT INTO worthkind_flow.hotel_invoices(id,property_id,dining_order_id,amount_minor,currency,issued_by) VALUES(%s,%s,%s,%s,%s,%s)",(invoice,prop,order,amount,currency,member))
+        pg.execute("INSERT INTO worthkind_flow.hotel_payment_intents(id,property_id,invoice_id,reference,account_alias,mode,amount_minor,currency,state,provider_transaction_id,verified_at) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,CASE WHEN %s='pending' THEN NULL ELSE now() END)",(payment,prop,invoice,str(payment),str(payment),mode,amount,currency,state,None if state=="pending" else 123,state))
+        if refund:
+            pg.execute("INSERT INTO worthkind_flow.hotel_refunds(property_id,payment_id,amount_minor,reason,state,requested_by,provider_refund_id,request_key) VALUES(%s,%s,%s,'Test refund evidence','processed',%s,%s,%s)",(prop,payment,refund,member,refund,str(uuid4())))
+    result=read("/payment-evidence")
+    groups={(g["mode"],g["currency"]):g for g in result["groups"]}
+    assert len(groups)==3 and not result["settlement_verified"]
+    assert groups["live","NGN"]["verified_gross_minor"]=="10000"
+    assert groups["live","NGN"]["processed_refunds_minor"]=="3000"
+    assert groups["live","NGN"]["net_after_refunds_minor"]=="7000"
+    assert groups["live","USD"]["net_after_refunds_minor"]=="0"
+    assert groups["test","NGN"]["verified_gross_minor"]=="70000"
+    assert read("/operations")["dining"]["in_service"]==0
+    with pytest.raises(errors.InsufficientPrivilege):
+        with command_session(pg,"wf_guest_api"):
+            pg.execute("SELECT worthkind_flow.management_snapshot(%s,%s)",("idp:hotel-a-owner","hotel-a"))
+
+
+def test_guest_department_tracking_and_application_withdrawal(pg, seeded):
+    prop=seeded["property_a"]
+    event_case=seeded["case_a"]
+    career_case=uuid4()
+    venue=uuid4()
+    vacancy=uuid4()
+    app_id=uuid4()
+    pg.execute("UPDATE worthkind_flow.guest_cases SET kind='events' WHERE id=%s",(event_case,))
+    pg.execute("INSERT INTO worthkind_flow.guest_cases(id,property_id,request_key,payload_hash,receipt_hash,kind) VALUES(%s,%s,'career-case-1',repeat('a',64),repeat('b',64),'careers')",(career_case,prop))
+    pg.execute("INSERT INTO worthkind_flow.event_venues(id,property_id,name,capacity) VALUES(%s,%s,'Conference Hall',100)",(venue,prop))
+    pg.execute("INSERT INTO worthkind_flow.vacancies(id,property_id,title,description,deadline,state) VALUES(%s,%s,'Kitchen assistant','Prepare meals',current_date+30,'published')",(vacancy,prop))
+    pg.execute("INSERT INTO worthkind_flow.job_applications(id,property_id,vacancy_id,case_id,encrypted_application) VALUES(%s,%s,%s,%s,%s)",(app_id,prop,vacancy,career_case,bytes(32)))
+    proof="b"*64
+    dates=pg.execute("SELECT now()+interval '3 days',now()+interval '3 days 4 hours'").fetchone()
+    create="SELECT * FROM worthkind_flow.request_venue_with_state(%s,%s,%s,%s,%s,%s,%s,%s)"
+    params=("hotel-a",event_case,proof,venue,*dates,50,"guest-venue-key")
+    with command_session(pg,"wf_guest_api"):
+        rid,state=pg.execute(create,params).fetchone()
+        assert state=="requested"
+    owner="idp:hotel-a-owner"
+    pg.execute("SELECT worthkind_flow.decide_venue(%s,%s,%s,'review')",(owner,"hotel-a",rid))
+    pg.execute("SELECT worthkind_flow.decide_venue(%s,%s,%s,'accept')",(owner,"hotel-a",rid))
+    with command_session(pg,"wf_guest_api"):
+        assert pg.execute(create,params).fetchone()==(rid,"accepted")
+        assert pg.execute("SELECT request_id,state FROM worthkind_flow.guest_venue_requests(%s,%s,%s,NULL,10)",("hotel-a",event_case,proof)).fetchall()==[(rid,"accepted")]
+        assert pg.execute("SELECT * FROM worthkind_flow.guest_venue_requests(%s,%s,%s,NULL,10)",("hotel-a",career_case,proof)).fetchall()==[]
+        assert pg.execute("SELECT application_id,state FROM worthkind_flow.guest_applications(%s,%s,%s,NULL,10)",("hotel-a",career_case,proof)).fetchall()==[(app_id,"submitted")]
+        assert pg.execute("SELECT * FROM worthkind_flow.guest_applications(%s,%s,%s,NULL,10)",("hotel-a",event_case,proof)).fetchall()==[]
+    for slug,case,receipt in (("hotel-b",career_case,proof),("hotel-a",career_case,"c"*64),("hotel-a",event_case,proof)):
+        with pytest.raises(errors.NoDataFound):
+            with command_session(pg,"wf_guest_api"):
+                pg.execute("SELECT worthkind_flow.withdraw_guest_application(%s,%s,%s,%s)",(slug,case,receipt,app_id))
+    with command_session(pg,"wf_guest_api"):
+        for _ in range(2):
+            assert pg.execute("SELECT worthkind_flow.withdraw_guest_application(%s,%s,%s,%s)",("hotel-a",career_case,proof,app_id)).fetchone()[0]=="withdrawn"
+    assert pg.execute("SELECT count(*) FROM worthkind_flow.department_events WHERE resource_id=%s AND action='application_withdrawn'",(app_id,)).fetchone()[0]==1
+    with pytest.raises(errors.CheckViolation):
+        pg.execute("SELECT worthkind_flow.review_application(%s,%s,%s,'review')",(owner,"hotel-a",app_id))
+
+
+def test_staff_attendance_self_only_and_idempotent(pg, oidc_rig, monkeypatch):
+    client,key,source=oidc_rig
+    monkeypatch.setenv("WF_OPERATIONS_POSTGRES_DSN",os.environ["WF_STAFF_POSTGRES_DSN"])
+    def headers(subject): return auth_header(signed_token(key,subject))
+    owner=headers("idp:hotel-a-owner")
+    reception=headers("idp:hotel-a-reception")
+    housekeeper=headers("idp:hotel-a-housekeeper")
+    outsider=headers("idp:hotel-b-reception")
+    base="/api/v1/properties/hotel-a/staff"
+    sid=pg.execute("SELECT worthkind_flow.schedule_staff_shift(%s,%s,%s,now()-interval '1 hour',now()+interval '1 hour')",("idp:hotel-a-owner","hotel-a",source["members"]["receptionist"])).fetchone()[0]
+    path=base+"/shifts/"+str(sid)+"/attendance"
+    assert client.post(path,json={"action":"check_in"},headers=owner).status_code==404
+    assert client.post(path,json={"action":"check_in"},headers=outsider).status_code==403
+    assert client.post(path,json={"action":"check_out"},headers=reception).status_code==409
+    first=client.post(path,json={"action":"check_in"},headers=reception)
+    assert first.status_code==200,first.text
+    assert first.json()["checked_out_at"] is None and not first.json()["duplicate"]
+    assert client.post(path,json={"action":"check_in"},headers=reception).json()["duplicate"]
+    assert client.post(base+"/shifts/"+str(sid)+"/cancel",headers=owner).status_code==409
+    ended=client.post(path,json={"action":"check_out"},headers=reception)
+    assert ended.status_code==200 and ended.json()["checked_out_at"]
+    assert client.post(path,json={"action":"check_out"},headers=reception).json()["duplicate"]
+    assert pg.execute("SELECT count(*) FROM worthkind_flow.staff_operation_events WHERE resource_id=%s AND action LIKE 'attendance_%%'",(sid,)).fetchone()[0]==2
+    from datetime import datetime,timedelta,timezone
+    now=datetime.now(timezone.utc)
+    params={"start":(now-timedelta(days=1)).isoformat(),"end":(now+timedelta(days=1)).isoformat()}
+    assert len(client.get(base+"/attendance",params=params,headers=owner).json()["attendance"])==1
+    assert len(client.get(base+"/attendance",params=params,headers=reception).json()["attendance"])==1
+    assert client.get(base+"/attendance",params=params,headers=housekeeper).json()["attendance"]==[]
+    with pytest.raises(errors.InsufficientPrivilege):
+        with command_session(pg,"wf_guest_api"):
+            pg.execute("SELECT * FROM worthkind_flow.staff_attendance")
+
+
+def test_guest_dining_receipt_and_authoritative_menu(pg, seeded):
+    from psycopg.types.json import Jsonb
+    prop=seeded["property_a"]
+    case=seeded["case_a"]
+    owner="idp:hotel-a-owner"
+    pg.execute("UPDATE worthkind_flow.guest_cases SET kind='food' WHERE id=%s",(case,))
+    item=pg.execute("SELECT id FROM worthkind_flow.save_menu_item(%s,%s,'rice','Rice','Fresh rice',2500,'NGN',true,0)",(owner,"hotel-a")).fetchone()[0]
+    sql="SELECT * FROM worthkind_flow.create_guest_dining_order(%s,%s,%s,%s,%s,%s)"
+    lines=Jsonb([{"item_id":str(item),"quantity":2}])
+    params=("hotel-a",case,"b"*64,"guest-dining-001",None,lines)
+    with pytest.raises(errors.NoDataFound):
+        with command_session(pg,"wf_guest_api"):
+            pg.execute(sql,("hotel-a",case,"c"*64,"guest-dining-001",None,lines))
+    with pytest.raises(errors.NoDataFound):
+        with command_session(pg,"wf_guest_api"):
+            pg.execute(sql,("hotel-a",case,"b"*64,"guest-dining-001",uuid4(),lines))
+    with command_session(pg,"wf_guest_api"):
+        order,state,total,currency,dup=pg.execute(sql,params).fetchone()
+        assert (state,total,currency,dup)==("submitted",5000,"NGN",False)
+        assert pg.execute(sql,params).fetchone()==(order,"submitted",5000,"NGN",True)
+    with pytest.raises(errors.UniqueViolation):
+        with command_session(pg,"wf_guest_api"):
+            pg.execute(sql,(*params[:-1],Jsonb([{"item_id":str(item),"quantity":3}])))
+    assert pg.execute("SELECT created_by,guest_case_id FROM worthkind_flow.dining_orders WHERE id=%s",(order,)).fetchone()==(None,case)
+    assert pg.execute("SELECT actor,guest_case_id FROM worthkind_flow.dining_events WHERE order_id=%s",(order,)).fetchone()==(None,case)
+    assert pg.execute("SELECT worthkind_flow.transition_dining_order(%s,%s,%s,'accept')",(owner,"hotel-a",order)).fetchone()[0]=="accepted"
+    with command_session(pg,"wf_guest_api"):
+        assert pg.execute("SELECT order_id,state,total_minor FROM worthkind_flow.guest_dining_orders(%s,%s,%s,NULL,10)",("hotel-a",case,"b"*64)).fetchall()==[(order,"accepted",5000)]
+        assert pg.execute("SELECT order_id FROM worthkind_flow.guest_dining_orders(%s,%s,%s,NULL,10)",("hotel-b",seeded["case_b"],"b"*64)).fetchall()==[]
+        assert pg.execute(sql,params).fetchone()==(order,"accepted",5000,"NGN",True)
+
+
+def test_staff_leave_independent_approval_and_schedule_guard(pg, oidc_rig, monkeypatch):
+    client,key,source=oidc_rig
+    monkeypatch.setenv("WF_OPERATIONS_POSTGRES_DSN",os.environ["WF_STAFF_POSTGRES_DSN"])
+    def headers(subject): return auth_header(signed_token(key,subject))
+    owner=headers("idp:hotel-a-owner")
+    reception=headers("idp:hotel-a-reception")
+    outsider=headers("idp:hotel-b-reception")
+    base="/api/v1/properties/hotel-a/staff"
+    from datetime import datetime,timedelta,timezone
+    start=datetime.now(timezone.utc)+timedelta(days=3)
+    end=start+timedelta(days=2)
+    body={"request_key":str(uuid4()),"starts_at":start.isoformat(),"ends_at":end.isoformat(),"leave_kind":"annual"}
+    response=client.post(base+"/leave",json=body,headers=reception)
+    assert response.status_code==201,response.text
+    lid=response.json()["id"]
+    path=base+"/leave/"+lid+"/decision"
+    assert client.post(base+"/leave",json=body,headers=reception).json()["duplicate"]
+    assert client.post(path,json={"action":"approve"},headers=reception).status_code==403
+    assert client.post(path,json={"action":"approve"},headers=outsider).status_code==403
+    shift={"membership_id":str(source["members"]["receptionist"]),"starts_at":start.isoformat(),"ends_at":(start+timedelta(hours=4)).isoformat()}
+    s=client.post(base+"/shifts",json=shift,headers=owner)
+    assert s.status_code==201,s.text
+    assert client.post(path,json={"action":"approve"},headers=owner).status_code==409
+    assert client.post(base+"/shifts/"+s.json()["id"]+"/cancel",headers=owner).status_code==200
+    assert client.post(path,json={"action":"approve"},headers=owner).json()["state"]=="approved"
+    assert client.post(path,json={"action":"approve"},headers=owner).json()["duplicate"]
+    assert client.post(base+"/shifts",json=shift,headers=owner).status_code==409
+    assert client.get(base+"/leave",headers=reception).json()["requests"][0]["state"]=="approved"
+    assert client.get(base+"/leave",headers=headers("idp:hotel-a-housekeeper")).json()["requests"]==[]
+    assert client.post(path,json={"action":"cancel"},headers=owner).json()["state"]=="cancelled"
+    assert client.post(base+"/shifts",json=shift,headers=owner).status_code==201
+
+
+def test_platform_crm_consent_and_operator_boundary(pg, oidc_rig, monkeypatch):
+    client,key,source=oidc_rig
+    monkeypatch.setenv("WF_PLATFORM_CRM_POSTGRES_DSN",make_conninfo(os.environ["WF_TEST_POSTGRES_DSN"],user="wf_ci_crm",password="worthkind_ci_crm_only"))
+    subject="idp:platform-crm-test"
+    sales=auth_header(signed_token(key,subject))
+    hotel=auth_header(signed_token(key,"idp:hotel-a-owner"))
+    base="/api/v1/platform/crm/prospects"
+    assert client.get(base,headers=hotel).status_code==403
+    assert client.get(base,headers=sales).status_code==403
+    pg.execute("SELECT worthkind_flow.set_crm_operator(%s,true,'CI operator approval')",(subject,))
+    payload={"account_key":"test-"+uuid4().hex,"hotel_name":"Test Hotel","source_reference":"CI referral","contact":"contact@example.invalid"}
+    created=client.post(base,json=payload,headers=sales)
+    assert created.status_code==201,created.text
+    pid=created.json()["id"]
+    assert client.post(base,json=payload,headers=sales).json()["duplicate"]
+    assert client.post(base,json={**payload,"hotel_name":"Changed hotel"},headers=sales).status_code==409
+    def change(revision,action,value):
+        return client.post(base+"/"+pid+"/change",json={"request_key":str(uuid4()),"revision":revision,"action":action,"value":value,"evidence_reference":"CI verified evidence"},headers=sales)
+    assert change(1,"stage","discovery").json()["stage"]=="discovery"
+    assert change(2,"stage","consented_waitlist").status_code==409
+    assert change(2,"consent","granted").json()["outreach_allowed"]
+    assert change(3,"stage","consented_waitlist").json()["stage"]=="consented_waitlist"
+    assert not change(4,"consent","revoked").json()["outreach_allowed"]
+    assert change(5,"stage","written_pilot_interest").status_code==409
+    entries=client.get(base,headers=sales).json()["prospects"]
+    assert next(x for x in entries if x["id"]==pid)["contact"]==payload["contact"]
+    assert payload["contact"].encode() not in pg.execute("SELECT encrypted_contact FROM worthkind_flow.crm_prospects WHERE id=%s",(pid,)).fetchone()[0]
+    with pytest.raises(errors.InsufficientPrivilege):
+        with pg.transaction():
+            pg.execute("SET LOCAL ROLE wf_platform_crm")
+            pg.execute("SELECT * FROM worthkind_flow.guest_cases")
+    pg.execute("SELECT worthkind_flow.set_crm_operator(%s,false,'CI operator revocation')",(subject,))
+    assert client.get(base,headers=sales).status_code==403
+
+
+def test_email_notifications_consent_and_provider_states(pg, seeded):
+    prop=seeded["property_a"]
+    case=seeded["case_a"]
+    owner="idp:hotel-a-owner"
+    event=uuid4()
+    pg.execute("UPDATE worthkind_flow.guest_cases SET encrypted_guest_payload=%s WHERE id=%s",(bytes(32),case))
+    pg.execute("INSERT INTO worthkind_flow.event_outbox(id,property_id,case_id,event_type) VALUES(%s,%s,%s,'case_responded')",(event,prop,case))
+    pg.execute("SELECT worthkind_flow.configure_email_notifications('hotel-a','test-account','hotel@example.invalid',true,'CI sender verification')")
+    queue="SELECT worthkind_flow.queue_email_notification(%s,%s,%s,%s,%s)"
+    params=(owner,"hotel-a",case,event,"CI contact verification")
+    with pytest.raises(errors.CheckViolation):
+        pg.execute(queue,params)
+    pg.execute("SELECT worthkind_flow.record_guest_consent('hotel-a',%s,repeat('b',64),'service_followup',true,'ci-policy')",(case,))
+    job=pg.execute(queue,params).fetchone()[0]
+    assert job["state"]=="pending"
+    assert pg.execute(queue,params).fetchone()[0]["duplicate"]
+    with pytest.raises(errors.InsufficientPrivilege):
+        pg.execute(queue,("idp:hotel-b-reception","hotel-a",case,event,"CI contact verification"))
+    with pg.transaction():
+        pg.execute("SET LOCAL ROLE wf_email_delivery")
+        lease=pg.execute("SELECT * FROM worthkind_flow.lease_email_notification()").fetchone()
+        assert str(lease[0])==job["id"] and lease[2]=="pending"
+        assert pg.execute("SELECT * FROM worthkind_flow.email_notification_payload(%s,%s)",lease[:2]).fetchone()
+        assert pg.execute("SELECT * FROM worthkind_flow.lease_email_notification()").fetchone() is None
+        provider=uuid4()
+        assert pg.execute("SELECT worthkind_flow.complete_email_notification(%s,%s,'accepted',%s)",(*lease[:2],provider)).fetchone()[0]
+    assert pg.execute("SELECT state FROM worthkind_flow.email_notifications WHERE id=%s",(job["id"],)).fetchone()[0]=="accepted"
+    pg.execute("UPDATE worthkind_flow.email_notifications SET next_attempt_at=now() WHERE id=%s",(job["id"],))
+    with pg.transaction():
+        pg.execute("SET LOCAL ROLE wf_email_delivery")
+        lease=pg.execute("SELECT * FROM worthkind_flow.lease_email_notification()").fetchone()
+        assert lease[2]=="accepted" and lease[5]==provider
+        assert pg.execute("SELECT * FROM worthkind_flow.email_notification_payload(%s,%s)",lease[:2]).fetchone() is None
+        assert pg.execute("SELECT worthkind_flow.complete_email_notification(%s,%s,'delivered',%s)",(*lease[:2],provider)).fetchone()[0]
+    assert pg.execute("SELECT state FROM worthkind_flow.email_notifications WHERE id=%s",(job["id"],)).fetchone()[0]=="delivered"
+    event2=pg.execute("INSERT INTO worthkind_flow.event_outbox(property_id,case_id,event_type) VALUES(%s,%s,'case_responded') RETURNING id",(prop,case)).fetchone()[0]
+    second=pg.execute(queue,(owner,"hotel-a",case,event2,"CI contact verification")).fetchone()[0]
+    pg.execute("SELECT worthkind_flow.record_guest_consent('hotel-a',%s,repeat('b',64),'service_followup',false,'ci-policy')",(case,))
+    with pg.transaction():
+        pg.execute("SET LOCAL ROLE wf_email_delivery")
+        lease=pg.execute("SELECT * FROM worthkind_flow.lease_email_notification()").fetchone()
+        assert str(lease[0])==second["id"]
+        assert pg.execute("SELECT * FROM worthkind_flow.email_notification_payload(%s,%s)",lease[:2]).fetchone() is None
+        assert pg.execute("SELECT worthkind_flow.complete_email_notification(%s,%s,'suppressed',NULL)",lease[:2]).fetchone()[0]
+    with pytest.raises(errors.InsufficientPrivilege):
+        with command_session(pg,"wf_guest_api"):
+            pg.execute("SELECT * FROM worthkind_flow.email_notifications")
+
+
+def test_platform_subscription_contract_isolation_and_immutable_plan(pg, oidc_rig, monkeypatch):
+    from datetime import datetime,timedelta,timezone
+    client,key,source=oidc_rig
+    monkeypatch.setenv("WF_OPERATIONS_POSTGRES_DSN",os.environ["WF_STAFF_POSTGRES_DSN"])
+    owner=auth_header(signed_token(key,"idp:hotel-a-owner"))
+    path="/api/v1/properties/hotel-a/staff/platform-subscription"
+    assert client.get(path,headers=owner).json()["status"]=="no_current_term"
+    plan_sql="SELECT worthkind_flow.register_platform_plan(%s,%s,%s,%s,%s,%s,%s,%s)"
+    args=("ci-"+uuid4().hex,1,"CI contract only","NGN",10000,200,"CI operator","CI contract evidence")
+    with pg.transaction():
+        pg.execute("SET LOCAL ROLE wf_hotel_provisioner")
+        pid=pg.execute(plan_sql,args).fetchone()[0]
+        assert pg.execute(plan_sql,args).fetchone()[0]==pid
+    with pytest.raises(errors.UniqueViolation):
+        pg.execute(plan_sql,(*args[:4],20000,*args[5:]))
+    now=datetime.now(timezone.utc)
+    term_sql="SELECT worthkind_flow.record_platform_subscription(%s,%s,%s,%s,%s,%s,%s)"
+    term=("hotel-a",pid,uuid4(),now-timedelta(days=1),now+timedelta(days=29),"CI operator","CI signed contract")
+    with pg.transaction():
+        pg.execute("SET LOCAL ROLE wf_hotel_provisioner")
+        tid=pg.execute(term_sql,term).fetchone()[0]
+        assert pg.execute(term_sql,term).fetchone()[0]==tid
+    with pytest.raises(errors.CheckViolation):
+        pg.execute(term_sql,(*term[:2],uuid4(),*term[3:]))
+    with pytest.raises(errors.UniqueViolation):
+        pg.execute(term_sql,(*term[:4],now+timedelta(days=30),*term[5:]))
+    result=client.get(path,headers=owner)
+    assert result.status_code==200,result.text
+    data=result.json()
+    assert data["status"]=="contract_recorded"
+    assert data["term"]["monthly_price_minor"]=="10000"
+    assert data["term"]["included_ai_calls"]==200
+    assert not data["payment_verified"] and data["usage_allowance_enforced"]
+    assert data["remaining_ai_units"]==200
+    for subject in ("idp:hotel-b-reception","idp:hotel-a-reception"):
+        assert client.get(path,headers=auth_header(signed_token(key,subject))).status_code==403
+    with pytest.raises(errors.InsufficientPrivilege):
+        with pg.transaction():
+            pg.execute("SET LOCAL ROLE wf_operations")
+            pg.execute(term_sql,term)
+    with pytest.raises(errors.InsufficientPrivilege):
+        with command_session(pg,"wf_guest_api"):
+            pg.execute("SELECT * FROM worthkind_flow.platform_subscription_terms")
+
+
+def test_contract_cancellation_is_immutable_idempotent_and_scoped(pg, seeded):
+    from datetime import datetime,timedelta,timezone
+    now=datetime.now(timezone.utc)
+    plan=pg.execute("SELECT worthkind_flow.register_platform_plan(%s,1,'CI cancellation','NGN',0,5,'CI operator','CI contract evidence')",("ci-"+uuid4().hex,)).fetchone()[0]
+    term=pg.execute("SELECT worthkind_flow.record_platform_subscription('hotel-a',%s,%s,%s,%s,'CI operator','CI contract evidence')",(plan,uuid4(),now-timedelta(days=1),now+timedelta(days=29))).fetchone()[0]
+    key=uuid4()
+    query="SELECT worthkind_flow.cancel_platform_subscription(%s,%s,%s,'CI operator','CI cancellation evidence')"
+    with pytest.raises(errors.NoDataFound):
+        pg.execute(query,("hotel-b",term,key))
+    with pytest.raises(errors.InsufficientPrivilege):
+        with pg.transaction():
+            pg.execute("SET LOCAL ROLE wf_operations")
+            pg.execute(query,("hotel-a",term,key))
+    with pg.transaction():
+        pg.execute("SET LOCAL ROLE wf_hotel_provisioner")
+        first=pg.execute(query,("hotel-a",term,key)).fetchone()[0]
+        assert not first["duplicate"]
+        assert pg.execute(query,("hotel-a",term,key)).fetchone()[0]["duplicate"]
+    with pytest.raises(errors.UniqueViolation):
+        pg.execute(query,("hotel-a",term,uuid4()))
+    assert pg.execute("SELECT ends_at FROM worthkind_flow.platform_subscription_terms WHERE id=%s",(term,)).fetchone()[0]==now+timedelta(days=29)
+    result=pg.execute("SELECT worthkind_flow.read_platform_subscription('idp:hotel-a-owner','hotel-a')").fetchone()[0]
+    assert result["status"]=="no_current_term" and result["usage_allowance_enforced"]
+    from datetime import datetime as dt
+    effective=dt.fromisoformat(first["effective_at"])
+    new_term=pg.execute("SELECT worthkind_flow.record_platform_subscription('hotel-a',%s,%s,%s,%s,'CI operator','CI replacement contract')",(plan,uuid4(),effective,effective+timedelta(days=30))).fetchone()[0]
+    assert new_term!=term
+
+
+def test_contract_weighted_ai_budget_preserves_pilot_and_daily_controls(pg, seeded):
+    from datetime import datetime,timedelta,timezone
+    slug="hotel-a"
+    owner="idp:hotel-a-owner"
+    now=datetime.now(timezone.utc)
+    pg.execute("INSERT INTO worthkind_flow.property_settings(property_id) VALUES(%s)",(seeded["property_a"],))
+    pg.execute("SELECT worthkind_flow.configure_ai_platform(true,50)")
+    try:
+        pg.execute("SELECT worthkind_flow.approve_ai_provider(%s,true,'CI provider approval')",(slug,))
+        cfg=pg.execute("SELECT worthkind_flow.manage_ai_policy(%s,%s,NULL,NULL,NULL,NULL,NULL,NULL)",(owner,slug)).fetchone()[0]
+        pg.execute("SELECT worthkind_flow.manage_ai_policy(%s,%s,%s,true,true,false,true,20)",(owner,slug,cfg["revision"]))
+        assert pg.execute("SELECT worthkind_flow.begin_ai_call(%s,NULL,'guest_chat')",(slug,)).fetchone()[0]
+        plan=pg.execute("SELECT worthkind_flow.register_platform_plan(%s,1,'CI budget','NGN',0,5,'CI operator','CI contract evidence')",("ci-"+uuid4().hex,)).fetchone()[0]
+        term=pg.execute("SELECT worthkind_flow.record_platform_subscription(%s,%s,%s,%s,%s,'CI operator','CI contract evidence')",(slug,plan,uuid4(),now-timedelta(days=1),now+timedelta(days=29))).fetchone()[0]
+        voice=pg.execute("SELECT worthkind_flow.begin_ai_call(%s,NULL,'voice')",(slug,)).fetchone()[0]
+        assert pg.execute("SELECT worthkind_flow.finish_ai_call(%s,%s,'failed',ARRAY[]::uuid[])",(slug,voice)).fetchone()[0]
+        with pytest.raises(errors.CheckViolation):
+            pg.execute("SELECT worthkind_flow.begin_ai_call(%s,NULL,'voice')",(slug,))
+        last=pg.execute("SELECT worthkind_flow.begin_ai_call(%s,NULL,'guest_chat')",(slug,)).fetchone()[0]
+        result=pg.execute("SELECT worthkind_flow.read_platform_subscription(%s,%s)",(owner,slug)).fetchone()[0]
+        assert result["used_ai_units"]==5 and result["remaining_ai_units"]==0
+        with pytest.raises(errors.CheckViolation):
+            pg.execute("SELECT worthkind_flow.begin_ai_call(%s,NULL,'guest_chat')",(slug,))
+        pg.execute("SELECT worthkind_flow.cancel_platform_subscription(%s,%s,%s,'CI operator','CI cancellation evidence')",(slug,term,uuid4()))
+        assert pg.execute("SELECT state FROM worthkind_flow.ai_calls WHERE id=%s",(last,)).fetchone()[0]=="revoked"
+        with pytest.raises(errors.NoDataFound):
+            pg.execute("SELECT worthkind_flow.begin_ai_call(%s,NULL,'guest_chat')",(slug,))
+    finally:
+        pg.execute("SELECT worthkind_flow.configure_ai_platform(false,1000)")
