@@ -24,7 +24,7 @@ import pytest
 
 MIGRATIONS = [
     Path(__file__).resolve().parents[3] / "db" / "migrations" / name
-    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql", "008_hotel_onboarding_settings.sql", "009_identity_provisioning.sql", "010_guest_quota.sql", "011_private_documents.sql", "012_operational_tickets.sql", "013_content_catalog.sql", "014_rooms_rates.sql", "015_rate_lookup_qualification.sql", "016_inventory_procurement.sql", "017_dining_kitchen.sql", "018_menu_lock_qualification.sql", "019_department_roles.sql", "020_staff_shifts.sql", "021_guest_preferences_feedback.sql", "022_reservation_intents.sql", "023_hotel_finance.sql", "024_events_recruitment.sql", "025_pms_accounts.sql", "026_reception_controls.sql", "027_payment_mode_boundaries.sql", "028_operations_read_contracts.sql", "029_native_booking_inventory.sql", "030_native_booking_changes.sql", "031_pos_receipt_evidence.sql", "032_purchase_batches.sql", "033_partial_refunds.sql", "034_native_stay_invoices.sql", "035_settlement_reconciliation.sql", "036_pms_reservation_evidence.sql", "037_native_stay_operations.sql", "038_pms_commands.sql", "039_provider_sync_guards.sql", "040_pos_refresh_worker.sql", "041_pos_cancellation_guard.sql", "042_pms_readback_recovery.sql", "043_provider_emergency_disable.sql", "044_ai_policy_and_retrieval.sql", "045_ai_automation_and_approvals.sql", "046_ai_retrieval_and_budget_guards.sql", "047_guest_resolution_decisions.sql", "048_staff_property_discovery.sql", "049_reception_handovers.sql", "050_management_reports.sql")
+    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql", "008_hotel_onboarding_settings.sql", "009_identity_provisioning.sql", "010_guest_quota.sql", "011_private_documents.sql", "012_operational_tickets.sql", "013_content_catalog.sql", "014_rooms_rates.sql", "015_rate_lookup_qualification.sql", "016_inventory_procurement.sql", "017_dining_kitchen.sql", "018_menu_lock_qualification.sql", "019_department_roles.sql", "020_staff_shifts.sql", "021_guest_preferences_feedback.sql", "022_reservation_intents.sql", "023_hotel_finance.sql", "024_events_recruitment.sql", "025_pms_accounts.sql", "026_reception_controls.sql", "027_payment_mode_boundaries.sql", "028_operations_read_contracts.sql", "029_native_booking_inventory.sql", "030_native_booking_changes.sql", "031_pos_receipt_evidence.sql", "032_purchase_batches.sql", "033_partial_refunds.sql", "034_native_stay_invoices.sql", "035_settlement_reconciliation.sql", "036_pms_reservation_evidence.sql", "037_native_stay_operations.sql", "038_pms_commands.sql", "039_provider_sync_guards.sql", "040_pos_refresh_worker.sql", "041_pos_cancellation_guard.sql", "042_pms_readback_recovery.sql", "043_provider_emergency_disable.sql", "044_ai_policy_and_retrieval.sql", "045_ai_automation_and_approvals.sql", "046_ai_retrieval_and_budget_guards.sql", "047_guest_resolution_decisions.sql", "048_staff_property_discovery.sql", "049_reception_handovers.sql", "050_management_reports.sql", "051_guest_department_tracking.sql")
 ]
 
 
@@ -1568,3 +1568,43 @@ def test_management_reports_are_scoped_and_payment_evidence_separates_modes(pg, 
     with pytest.raises(errors.InsufficientPrivilege):
         with command_session(pg,"wf_guest_api"):
             pg.execute("SELECT worthkind_flow.management_snapshot(%s,%s)",("idp:hotel-a-owner","hotel-a"))
+
+
+def test_guest_department_tracking_and_application_withdrawal(pg, seeded):
+    prop=seeded["property_a"]
+    event_case=seeded["case_a"]
+    career_case=uuid4()
+    venue=uuid4()
+    vacancy=uuid4()
+    app_id=uuid4()
+    pg.execute("UPDATE worthkind_flow.guest_cases SET kind='events' WHERE id=%s",(event_case,))
+    pg.execute("INSERT INTO worthkind_flow.guest_cases(id,property_id,request_key,payload_hash,receipt_hash,kind) VALUES(%s,%s,'career-case-1',repeat('a',64),repeat('b',64),'careers')",(career_case,prop))
+    pg.execute("INSERT INTO worthkind_flow.event_venues(id,property_id,name,capacity) VALUES(%s,%s,'Conference Hall',100)",(venue,prop))
+    pg.execute("INSERT INTO worthkind_flow.vacancies(id,property_id,title,description,deadline,state) VALUES(%s,%s,'Kitchen assistant','Prepare meals',current_date+30,'published')",(vacancy,prop))
+    pg.execute("INSERT INTO worthkind_flow.job_applications(id,property_id,vacancy_id,case_id,encrypted_application) VALUES(%s,%s,%s,%s,%s)",(app_id,prop,vacancy,career_case,bytes(32)))
+    proof="b"*64
+    dates=pg.execute("SELECT now()+interval '3 days',now()+interval '3 days 4 hours'").fetchone()
+    create="SELECT * FROM worthkind_flow.request_venue_with_state(%s,%s,%s,%s,%s,%s,%s,%s)"
+    params=("hotel-a",event_case,proof,venue,*dates,50,"guest-venue-key")
+    with command_session(pg,"wf_guest_api"):
+        rid,state=pg.execute(create,params).fetchone()
+        assert state=="requested"
+    owner="idp:hotel-a-owner"
+    pg.execute("SELECT worthkind_flow.decide_venue(%s,%s,%s,'review')",(owner,"hotel-a",rid))
+    pg.execute("SELECT worthkind_flow.decide_venue(%s,%s,%s,'accept')",(owner,"hotel-a",rid))
+    with command_session(pg,"wf_guest_api"):
+        assert pg.execute(create,params).fetchone()==(rid,"accepted")
+        assert pg.execute("SELECT request_id,state FROM worthkind_flow.guest_venue_requests(%s,%s,%s,NULL,10)",("hotel-a",event_case,proof)).fetchall()==[(rid,"accepted")]
+        assert pg.execute("SELECT * FROM worthkind_flow.guest_venue_requests(%s,%s,%s,NULL,10)",("hotel-a",career_case,proof)).fetchall()==[]
+        assert pg.execute("SELECT application_id,state FROM worthkind_flow.guest_applications(%s,%s,%s,NULL,10)",("hotel-a",career_case,proof)).fetchall()==[(app_id,"submitted")]
+        assert pg.execute("SELECT * FROM worthkind_flow.guest_applications(%s,%s,%s,NULL,10)",("hotel-a",event_case,proof)).fetchall()==[]
+    for slug,case,receipt in (("hotel-b",career_case,proof),("hotel-a",career_case,"c"*64),("hotel-a",event_case,proof)):
+        with pytest.raises(errors.NoDataFound):
+            with command_session(pg,"wf_guest_api"):
+                pg.execute("SELECT worthkind_flow.withdraw_guest_application(%s,%s,%s,%s)",(slug,case,receipt,app_id))
+    with command_session(pg,"wf_guest_api"):
+        for _ in range(2):
+            assert pg.execute("SELECT worthkind_flow.withdraw_guest_application(%s,%s,%s,%s)",("hotel-a",career_case,proof,app_id)).fetchone()[0]=="withdrawn"
+    assert pg.execute("SELECT count(*) FROM worthkind_flow.department_events WHERE resource_id=%s AND action='application_withdrawn'",(app_id,)).fetchone()[0]==1
+    with pytest.raises(errors.CheckViolation):
+        pg.execute("SELECT worthkind_flow.review_application(%s,%s,%s,'review')",(owner,"hotel-a",app_id))

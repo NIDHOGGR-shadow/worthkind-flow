@@ -2,7 +2,7 @@
 from datetime import date,timedelta
 from typing import Literal
 from uuid import UUID
-from fastapi import Header,Depends,HTTPException
+from fastapi import Header,Depends,HTTPException,Query
 from pydantic import AwareDatetime,BaseModel,Field,StrictBool
 from guest_records_pg import proof
 from guest_quota import enforce_guest_quota
@@ -43,6 +43,27 @@ class ApplicationDecision(BaseModel):
 def install_department_routes(app):
     base="/api/v1/properties/{slug}"
     g=base+"/guest/cases/{case_id}"
+    @app.get(g+"/venue-requests",dependencies=[Depends(enforce_guest_quota)])
+    def guest_venues(slug:str,case_id:UUID,after:UUID|None=None,limit:int=Query(50,ge=1,le=100),x_receipt_token:str|None=Header(None)):
+        rows=command("SELECT * FROM worthkind_flow.guest_venue_requests(%s,%s,%s,%s,%s)",
+                     (slug,case_id,proof(x_receipt_token),after,limit+1),many=True,guest=True)
+        return {"requests":[{"id":str(r[0]),"venue_id":str(r[1]),"venue_name":r[2],"starts_at":r[3].isoformat(),
+                             "ends_at":r[4].isoformat(),"attendance":r[5],"state":r[6]} for r in rows[:limit]],
+                "next_cursor":str(rows[limit-1][0]) if len(rows)>limit else None}
+
+    @app.get(g+"/applications",dependencies=[Depends(enforce_guest_quota)])
+    def guest_applications(slug:str,case_id:UUID,after:UUID|None=None,limit:int=Query(50,ge=1,le=100),x_receipt_token:str|None=Header(None)):
+        rows=command("SELECT * FROM worthkind_flow.guest_applications(%s,%s,%s,%s,%s)",
+                     (slug,case_id,proof(x_receipt_token),after,limit+1),many=True,guest=True)
+        return {"applications":[{"id":str(r[0]),"vacancy_id":str(r[1]),"title":r[2],"state":r[3],"created_at":r[4].isoformat()} for r in rows[:limit]],
+                "next_cursor":str(rows[limit-1][0]) if len(rows)>limit else None}
+
+    @app.post(g+"/applications/{application_id}/withdraw",dependencies=[Depends(enforce_guest_quota)])
+    def withdraw(slug:str,case_id:UUID,application_id:UUID,x_receipt_token:str|None=Header(None)):
+        r=command("SELECT worthkind_flow.withdraw_guest_application(%s,%s,%s,%s)",
+                  (slug,case_id,proof(x_receipt_token),application_id),guest=True)
+        return {"id":str(application_id),"state":r[0]}
+
     @app.get(base+"/venues")
     def venues(slug:str):
         rows=command("SELECT * FROM worthkind_flow.public_venues(%s)",(slug,),many=True,public=True)
@@ -57,9 +78,9 @@ def install_department_routes(app):
     def request_venue(slug:str,case_id:UUID,body:VenueRequest,x_receipt_token:str|None=Header(None)):
         if body.ends_at<=body.starts_at or body.ends_at-body.starts_at>timedelta(days=7):
             raise HTTPException(422,"Invalid event date range")
-        r=command("SELECT worthkind_flow.request_venue(%s,%s,%s,%s,%s,%s,%s,%s)",
+        r=command("SELECT * FROM worthkind_flow.request_venue_with_state(%s,%s,%s,%s,%s,%s,%s,%s)",
                   (slug,case_id,proof(x_receipt_token),body.venue_id,body.starts_at,body.ends_at,body.attendance,body.request_key),guest=True)
-        return {"id":str(r[0]),"state":"requested"}
+        return {"id":str(r[0]),"state":r[1]}
 
     @app.get(base+"/staff/venue-requests")
     def events(slug:str,authorization:str|None=Header(None)):
