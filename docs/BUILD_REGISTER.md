@@ -147,3 +147,9 @@ Next: investigate Actions issue #68 and obtain executed passing CI for browser P
 ## 2026-11-26 — Deferred model candidates and staff property discovery
 - Added docs/AI_MODEL_SHORTLIST.md. Candidate research only; Modal activation explicitly deferred, no model selection hard-coded or external resources provisioned.
 - Migration 048 and GET /api/v1/staff/properties provide paginated identity-scoped active and invited memberships. Invited state is not an access grant. Revoked memberships, suspended identities, inactive properties and unverified organizations are omitted. Existing per-operation authorization remains authoritative. Added signed-token PostgreSQL/API regression coverage. CI and hosted migration acceptance pending; frontend integration not changed.
+
+### Verification addendum — migration 048
+- Commit 70465f7c868f6c94a66aef425f1ab1d2f550cacc: backend runtime run 45853509689 and database recovery run 45853509658 passed. Exact migration 048 applied to existing staging xfxqlcmsfkbvbybkrppq. Verified wf_operations EXECUTE only (anon/authenticated denied), unknown subject returned zero rows. Hosted HTTP acceptance pending.
+
+## 2026-11-26 — Reception handovers
+- Migration 049 and staff endpoints /handover-recipients, /handovers, /handovers/{id}/decision (under /api/v1/properties/{slug}/staff) persist encrypted notes and optional same-property active case links. Recipient acknowledgement only; sender/manager cancellation; idempotent create and decision, serialized terminal transitions, audit trail. No change to actual case assignment; use existing transfer command separately. No claim of external notification or scheduled shift attendance. Recipient selection limited to active reception roles; paginated UUID cursor, optional pending-only filter. Signed-token PostgreSQL regression added; CI and hosted acceptance pending. Frontend integration separate.

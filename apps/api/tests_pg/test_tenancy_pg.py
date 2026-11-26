@@ -24,7 +24,7 @@ import pytest
 
 MIGRATIONS = [
     Path(__file__).resolve().parents[3] / "db" / "migrations" / name
-    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql", "008_hotel_onboarding_settings.sql", "009_identity_provisioning.sql", "010_guest_quota.sql", "011_private_documents.sql", "012_operational_tickets.sql", "013_content_catalog.sql", "014_rooms_rates.sql", "015_rate_lookup_qualification.sql", "016_inventory_procurement.sql", "017_dining_kitchen.sql", "018_menu_lock_qualification.sql", "019_department_roles.sql", "020_staff_shifts.sql", "021_guest_preferences_feedback.sql", "022_reservation_intents.sql", "023_hotel_finance.sql", "024_events_recruitment.sql", "025_pms_accounts.sql", "026_reception_controls.sql", "027_payment_mode_boundaries.sql", "028_operations_read_contracts.sql", "029_native_booking_inventory.sql", "030_native_booking_changes.sql", "031_pos_receipt_evidence.sql", "032_purchase_batches.sql", "033_partial_refunds.sql", "034_native_stay_invoices.sql", "035_settlement_reconciliation.sql", "036_pms_reservation_evidence.sql", "037_native_stay_operations.sql", "038_pms_commands.sql", "039_provider_sync_guards.sql", "040_pos_refresh_worker.sql", "041_pos_cancellation_guard.sql", "042_pms_readback_recovery.sql", "043_provider_emergency_disable.sql", "044_ai_policy_and_retrieval.sql", "045_ai_automation_and_approvals.sql", "046_ai_retrieval_and_budget_guards.sql", "047_guest_resolution_decisions.sql", "048_staff_property_discovery.sql")
+    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql", "008_hotel_onboarding_settings.sql", "009_identity_provisioning.sql", "010_guest_quota.sql", "011_private_documents.sql", "012_operational_tickets.sql", "013_content_catalog.sql", "014_rooms_rates.sql", "015_rate_lookup_qualification.sql", "016_inventory_procurement.sql", "017_dining_kitchen.sql", "018_menu_lock_qualification.sql", "019_department_roles.sql", "020_staff_shifts.sql", "021_guest_preferences_feedback.sql", "022_reservation_intents.sql", "023_hotel_finance.sql", "024_events_recruitment.sql", "025_pms_accounts.sql", "026_reception_controls.sql", "027_payment_mode_boundaries.sql", "028_operations_read_contracts.sql", "029_native_booking_inventory.sql", "030_native_booking_changes.sql", "031_pos_receipt_evidence.sql", "032_purchase_batches.sql", "033_partial_refunds.sql", "034_native_stay_invoices.sql", "035_settlement_reconciliation.sql", "036_pms_reservation_evidence.sql", "037_native_stay_operations.sql", "038_pms_commands.sql", "039_provider_sync_guards.sql", "040_pos_refresh_worker.sql", "041_pos_cancellation_guard.sql", "042_pms_readback_recovery.sql", "043_provider_emergency_disable.sql", "044_ai_policy_and_retrieval.sql", "045_ai_automation_and_approvals.sql", "046_ai_retrieval_and_budget_guards.sql", "047_guest_resolution_decisions.sql", "048_staff_property_discovery.sql", "049_reception_handovers.sql")
 ]
 
 
@@ -1479,3 +1479,49 @@ def test_staff_property_discovery_and_revocation(pg, oidc_rig, monkeypatch):
     with pytest.raises(errors.InsufficientPrivilege):
         with command_session(pg,"wf_guest_api"):
             pg.execute("SELECT * FROM worthkind_flow.list_staff_properties(%s,NULL,10)",(owner,))
+
+
+def test_reception_handover_acknowledgement_and_tenant_boundary(pg, oidc_rig, monkeypatch):
+    client,key,source=oidc_rig
+    monkeypatch.setenv("WF_OPERATIONS_POSTGRES_DSN",os.environ["WF_STAFF_POSTGRES_DSN"])
+    def headers(subject): return auth_header(signed_token(key,subject))
+    owner=headers("idp:hotel-a-owner")
+    reception=headers("idp:hotel-a-reception")
+    outside=headers("idp:hotel-b-reception")
+    housekeeper=headers("idp:hotel-a-housekeeper")
+    base="/api/v1/properties/hotel-a/staff"
+    path=base+"/handovers"
+    recipients=client.get(base+"/handover-recipients",headers=owner)
+    assert recipients.status_code==200,recipients.text
+    assert [r["membership_id"] for r in recipients.json()["recipients"]]==[str(source["members"]["receptionist"])]
+    assert client.get(base+"/handover-recipients",headers=housekeeper).status_code==403
+    body={"recipient_id":str(source["members"]["receptionist"]),"case_id":str(source["case_a"]),"request_key":str(uuid4()),"note":"Guest awaiting reception follow up"}
+    assert client.post(path,json={**body,"case_id":str(source["case_b"])},headers=owner).status_code==404
+    assert client.post(path,json={**body,"recipient_id":str(source["members"]["outsider"])},headers=owner).status_code==404
+    assert client.post(path,json=body,headers=outside).status_code==403
+    r=client.post(path,json=body,headers=owner)
+    assert r.status_code==201,r.text
+    hid=r.json()["id"]
+    assert client.post(path,json=body,headers=owner).json()["duplicate"] is True
+    assert client.post(path,json={**body,"note":"Changed handover note"},headers=owner).status_code==409
+    assert client.get(path,headers=housekeeper).status_code==403
+    assert client.get(path,headers=outside).status_code==403
+    assert client.get(path,headers=reception).json()["handovers"][0]["note"]==body["note"]
+    assert body["note"].encode() not in pg.execute("SELECT encrypted_note FROM worthkind_flow.reception_handovers WHERE id=%s",(hid,)).fetchone()[0]
+    decision=path+"/"+hid+"/decision"
+    assert client.post(decision,json={"action":"acknowledge"},headers=owner).status_code==403
+    assert client.post(decision,json={"action":"cancel"},headers=reception).status_code==403
+    assert client.post(decision,json={"action":"acknowledge"},headers=reception).json()["state"]=="acknowledged"
+    assert client.post(decision,json={"action":"acknowledge"},headers=reception).json()["duplicate"] is True
+    assert client.post(decision,json={"action":"cancel"},headers=owner).status_code==409
+    assert client.get(path,headers=reception).json()["handovers"]==[]
+    assert client.get(path+"?pending=false",headers=owner).json()["handovers"][0]["state"]=="acknowledged"
+    assert pg.execute("SELECT state FROM worthkind_flow.guest_cases WHERE id=%s",(source["case_a"],)).fetchone()[0]=="queued"
+    assert pg.execute("SELECT count(*) FROM worthkind_flow.staff_operation_events WHERE resource_id=%s",(hid,)).fetchone()[0]==2
+    second=client.post(path,json={**body,"request_key":str(uuid4())},headers=owner).json()["id"]
+    pg.execute("UPDATE worthkind_flow.staff_memberships SET state='revoked',revoked_at=now() WHERE id=%s",(source["members"]["receptionist"],))
+    assert client.post(path+"/"+second+"/decision",json={"action":"acknowledge"},headers=reception).status_code==403
+    assert client.post(path+"/"+second+"/decision",json={"action":"cancel"},headers=owner).json()["state"]=="cancelled"
+    with pytest.raises(errors.InsufficientPrivilege):
+        with command_session(pg,"wf_guest_api"):
+            pg.execute("SELECT * FROM worthkind_flow.reception_handovers")
