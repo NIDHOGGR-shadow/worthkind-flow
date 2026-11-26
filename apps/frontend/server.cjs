@@ -24,6 +24,7 @@ const allowed=[
  ["GET","/guest/cases/"+UUID+"/reservation-intents"],["POST","/guest/cases/"+UUID+"/reservation-intents"],["POST","/guest/cases/"+UUID+"/reservation-intents/"+UUID+"/withdraw"],["POST","/guest/cases/"+UUID+"/venue-requests"],
  ["GET","/staff/reservation-intents"],["POST","/staff/reservation-intents/"+UUID+"/review"],
  ["GET","/staff/pms/availability"],["GET","/staff/pms/channel-reservations"],["PUT","/staff/room-types"],["POST","/staff/rooms"],["PUT","/staff/display-rates"],["PUT","/staff/menu"],["POST","/staff/venues"],["GET","/staff/pms/reservations/[A-Za-z0-9_-]{1,100}"],
+ ["GET","/guest/cases/"+UUID+"/dining/orders"],["POST","/guest/cases/"+UUID+"/dining/orders"],["GET","/staff/reports/operations"],["GET","/staff/reports/payment-evidence"],["GET","/staff/platform-subscription"],
  ["GET","/staff/dining/orders"],["POST","/staff/dining/orders"],["POST","/staff/dining/orders/"+UUID+"/transition"],
  ["GET","/staff/venue-requests"],["POST","/staff/venue-requests/"+UUID+"/decision"],
  ["GET","/staff/finance"],["POST","/staff/finance/invoices"],["POST","/staff/finance/invoices/"+UUID+"/checkout"],["POST","/staff/finance/invoices/"+UUID+"/void"],["POST","/staff/finance/payments/"+UUID+"/verify"],["POST","/staff/finance/refunds"],["POST","/staff/finance/refunds/"+UUID+"/(?:decision|submit|verify)"],
