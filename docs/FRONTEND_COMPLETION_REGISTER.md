@@ -35,7 +35,8 @@ Q1 status: source implementation and prior automated browser checks passed; visu
 - [ ] Expanded Chromium suite passed in run 45695602215 (72 layout checks). Subsequent gateway HTTP tests and Chromium suite passed in run 45696044082; ticket-history browser coverage and screenshot capture passed in run 45696214366; visual inspection remains open.
 - [ ] Configure an approved identity project and test real staff identities, roles and session lifecycle against authorized hosted PostgreSQL. OIDC interactive login, MFA and recovery remain outside this implementation.
 - [ ] Same-origin frontend gateway and nonroot container implemented; real loopback HTTP tests passed in run 45696044082 (versioned route allowlist, no legacy exposure, no forwarded client secrets/cookies, redirect/HTML denial). Hosted deployment and upstream rate-limit topology still require verification. See docs/FRONTEND_DEPLOYMENT.md.
-- [ ] Connect dedicated shift handover and guest-confirmed resolution when their backend contracts exist. Neither a ticket note nor a staff resolve command substitutes for them.
+- [x] Guest resolution confirmation and reopening connected to migration 047 and receipt-scoped resolution endpoints; source and regression tests committed. Full newest browser verification pending.
+- [ ] Dedicated shift handover remains a separate backend contract dependency. A ticket note is not a substitute.
 
 Q2 status: all currently available scoped staff API contracts implemented in source, including newly added ticket history. Four checklist gates remain open (two partially satisfied by passing automated browser/gateway tests). Backend PR #3 remains a separate integration dependency; dedicated handover, guest-confirmed case resolution, hosted identity and deployment are not claimed. Do not count fixture tests as proof of live integrations.
 
@@ -123,3 +124,10 @@ Owner direction: keep frontend work focused on finishing the existing product. D
 - [x] Refreshable hotel operational overview uses eight authorized record reads with independent partial access handling, excludes denied sections, never invents totals, and navigates to the corresponding modules. Counts reflect returned records, not full occupancy or financial analytics.
 - [x] Named staff profile and shift selectors use scoped roster data and reset on property/session changes. Tests added for selectors, drill-down and partial finance denial at 37939f97e3a81101b3494d1e574d8f68780b90ce. Latest expanded CI outcome not yet verified.
 - [ ] Remaining frontend work: role/capability-driven navigation once authoritative capability API exists, hotel provisioning/onboarding and property branding contracts, complete business reporting, persistent messaging and routing, and integrated visual/accessibility acceptance. No infrastructure or backend writes made.
+
+## Final frontend quarter — property discovery and service closure
+- [x] Previous full CI run 45846932577 passed, including operational dashboard and roster selectors.
+- [x] Connected authenticated paginated staff property discovery from migration 048. Named hotel selection, role and timezone display, invitation review, manual known-code fallback, session cleanup, and owner/manager landing in management. No invented permissions or automatic invitation acceptance.
+- [x] Connected guest resolution snapshot, explicit confirm/reopen, exact resolution ID verification, private receipt transport, duplicate-action blocking and server refresh. Staff can check guest confirmation independently of staff resolution.
+- [x] Exact frontend gateway route allowlist extended for the newly available API contracts. Three contract regression tests plus browser fixtures committed. Latest UI revision 462db1dfef2d9ad9297399f71aec8e8e80640566; newest CI not yet verified at time of this entry.
+- [ ] Remaining contract-dependent items: complete role/capability navigation, hotel onboarding/branding, persistent guest/staff conversations, shift handover, actual reporting and hosted acceptance. No backend or infrastructure changes; no claim of completed live operation.
