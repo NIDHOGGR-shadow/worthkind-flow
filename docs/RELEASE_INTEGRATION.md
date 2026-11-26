@@ -11,3 +11,6 @@ The new HTTP test uses real Node gateway, Uvicorn and PostgreSQL on loopback wit
 ## Verified integration CI — 2026-11-26
 
 Functional commit `a801cc9ce80a0e7e494df34c19b00d99d2f5c9bb`: all three workflows succeeded. [Backend boundary and real HTTP/PostgreSQL journey](https://github.com/NIDHOGGR-shadow/worthkind-flow/actions/runs/45866799846), [frontend JavaScript contracts and actual browser journey/viewport checks](https://github.com/NIDHOGGR-shadow/worthkind-flow/actions/runs/45866800111), [database recovery rehearsal](https://github.com/NIDHOGGR-shadow/worthkind-flow/actions/runs/45866799720). These are CI checks against disposable data, not hosted acceptance. Staging database migrations 052–056 were applied separately; no live provider delivery or production release was performed.
+
+## Quarter one refresh
+Backend through e4200cdae1aadccb28b9dcdc1b54a341ebfe5f54 integrated with preserved frontend and existing combined HTTP journey. Added read-only platform subscription gateway route and integrated contract assertions. New migrations 057–059 and Model API adapter included. CI pending. No deployment or provider activation.

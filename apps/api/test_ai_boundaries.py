@@ -6,7 +6,7 @@ import unittest
 import wave
 from unittest.mock import patch
 from fastapi import HTTPException
-from modal_ai_provider import validate_selection,configuration,ModelUnavailable
+from modal_ai_provider import validate_selection,configuration,ModelUnavailable,select_sources
 from ai_gateway import Question,answer,sanitize,search_query
 from ai_voice import validate_input,synthesize,voice_config
 
@@ -44,6 +44,41 @@ class AIBoundaryTests(unittest.TestCase):
                         "https://user@test.modal.run/v1/chat/completions","https://test.modal.run/v1/chat/completions?x=1"):
                 with patch.dict(os.environ,{"WF_MODAL_CHAT_URL":url}),self.assertRaises(ModelUnavailable):
                     configuration()
+
+    def test_modal_model_api_regional_origin_and_bearer_auth(self):
+        url="https://workspace-dev--ep-chat-server.us-west.modal.direct/v1/chat/completions"
+        env={"WF_MODAL_ENABLED":"1","WF_MODAL_CHAT_URL":url,"WF_MODAL_CHAT_MODEL":"fixture-model",
+             "WF_MODAL_PROXY_KEY":"wk-fixture","WF_MODAL_PROXY_SECRET":"ws-fixture"}
+        sources=[{"id":"known-a","text":"Breakfast at seven"}]
+        with patch.dict(os.environ,env,clear=True):
+            self.assertEqual(configuration()[0],url)
+            for bad in (
+                "https://workspace--chat.us-west.modal.direct.evil.invalid/v1/chat/completions",
+                "https://user@workspace--chat.us-west.modal.direct/v1/chat/completions",
+                "https://workspace--chat.us-west.modal.direct:443/v1/chat/completions",
+                "https://workspace--chat.us-west.modal.direct/v1/chat/completions?key=x",
+                "https://workspace--chat.us-west.modal.direct/v1/models",
+                "https://modal.direct/v1/chat/completions",
+                "http://workspace--chat.us-west.modal.direct/v1/chat/completions",
+            ):
+                with patch.dict(os.environ,{"WF_MODAL_CHAT_URL":bad}),self.assertRaises(ModelUnavailable):
+                    configuration()
+            for endpoint in (url,"https://workspace--chat.modal.run/v1/chat/completions"):
+                with patch.dict(os.environ,{"WF_MODAL_CHAT_URL":endpoint}),patch("modal_ai_provider.build_opener") as opener:
+                    response=opener.return_value.open.return_value.__enter__.return_value
+                    response.read.return_value=json.dumps({"choices":[{"finish_reason":"stop","message":{"content":'{"source_ids":["known-a"]}'}}]}).encode()
+                    self.assertEqual(select_sources("Breakfast?",sources),["known-a"])
+                    req=opener.return_value.open.call_args.args[0]
+                    self.assertEqual(req.full_url,endpoint)
+                    if endpoint==url:
+                        self.assertEqual(req.get_header("Authorization"),"Bearer wk-fixture.ws-fixture")
+                        self.assertIsNone(req.get_header("Modal-key"))
+                    else:
+                        self.assertEqual(req.get_header("Modal-key"),"wk-fixture")
+                        self.assertIsNone(req.get_header("Authorization"))
+                    payload=json.loads(req.data)
+                    self.assertEqual(payload["max_tokens"],128)
+                    self.assertNotIn("tools",payload)
 
     def test_direct_handoff_precedes_inference_and_database(self):
         cases=[

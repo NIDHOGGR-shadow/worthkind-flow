@@ -20,7 +20,9 @@ def configuration():
     except ValueError:
         raise ModelUnavailable("Model connection unavailable") from None
     if (os.getenv("WF_MODAL_ENABLED")!="1" or parsed.scheme!="https" or
-        not parsed.hostname or not parsed.hostname.endswith(".modal.run") or parsed.netloc!=parsed.hostname or
+        not parsed.hostname or not (parsed.hostname.endswith(".modal.run") or
+            re.fullmatch(r"[a-z0-9][a-z0-9-]*--[a-z0-9][a-z0-9-]*\.[a-z0-9-]+\.modal\.direct",parsed.hostname)) or
+        parsed.netloc!=parsed.hostname or
         parsed.path!="/v1/chat/completions" or parsed.query or parsed.fragment or
         not key.startswith("wk-") or not secret.startswith("ws-") or not model or len(model)>160):
         raise ModelUnavailable("Model connection unavailable")
@@ -34,7 +36,13 @@ def select_sources(question,sources):
         {"role":"user","content":json.dumps({"question":question,"sources":sources},ensure_ascii=False)}
     ]}
     raw=json.dumps(payload,ensure_ascii=False).encode()
-    req=Request(url,data=raw,method="POST",headers={"Modal-Key":key,"Modal-Secret":secret,"Content-Type":"application/json","Accept":"application/json"})
+    headers={"Content-Type":"application/json","Accept":"application/json"}
+    if urlsplit(url).hostname.endswith(".modal.direct"):
+        # Modal Servers and Model APIs accept the combined proxy token as bearer auth.
+        headers["Authorization"]=f"Bearer {key}.{secret}"
+    else:
+        headers.update({"Modal-Key":key,"Modal-Secret":secret})
+    req=Request(url,data=raw,method="POST",headers=headers)
     try:
         with build_opener(NoRedirect()).open(req,timeout=25) as response:
             data=response.read(65537)

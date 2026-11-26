@@ -19,7 +19,7 @@ const allowed=[
  ["GET","/staff/settings"],["PUT","/staff/settings"],["POST","/staff/memberships/(?:invite|accept|revoke)"],
  ["GET","/staff/handover-recipients"],["GET","/staff/handovers"],["POST","/staff/handovers"],["POST","/staff/handovers/"+UUID+"/decision"],
  ["GET","/staff/attendance"],["POST","/staff/shifts/"+UUID+"/attendance"],["GET","/staff/leave"],["POST","/staff/leave"],["POST","/staff/leave/"+UUID+"/decision"],
- ["GET","/staff/reports/(?:operations|payment-evidence)"],["GET","/guest/cases/"+UUID+"/venue-requests"],["GET","/guest/cases/"+UUID+"/applications"],["POST","/guest/cases/"+UUID+"/applications/"+UUID+"/withdraw"],
+ ["GET","/staff/platform-subscription"],["GET","/staff/reports/(?:operations|payment-evidence)"],["GET","/guest/cases/"+UUID+"/venue-requests"],["GET","/guest/cases/"+UUID+"/applications"],["POST","/guest/cases/"+UUID+"/applications/"+UUID+"/withdraw"],
  ["GET","/guest/cases/"+UUID+"/dining/orders"],["POST","/guest/cases/"+UUID+"/dining/orders"],["GET","/staff/cases/"+UUID+"/notifications"],["POST","/staff/cases/"+UUID+"/notifications"],
  ["GET","/staff/schedule"],["PUT","/staff/profiles/"+UUID],["POST","/staff/shifts"],["POST","/staff/shifts/"+UUID+"/cancel"],
  ["GET","/staff/rooms"],["PUT","/staff/rooms/"+UUID+"/state"],

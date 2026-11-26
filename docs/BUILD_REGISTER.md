@@ -180,3 +180,23 @@ Next: investigate Actions issue #68 and obtain executed passing CI for browser P
 
 ## 2026-11-26 — Transactional email delivery
 - Migration 056 adds reception-authorized service update email jobs, explicit operator-verified contact reference and guest service-followup consent, per-property approved sender/account, bounded provider retries, lease exclusion and Resend provider readback. No automatic marketing or unauthenticated sends; receipt data and guest content are not included in mail. Accepted is not delivered. Consent rechecked before provider call; an in-flight external call cannot be unsent. Polling avoids webhook setup but requires a read-capable scoped Resend account credential. Worker profile defaults disabled; no provider account, sender, hosted worker or delivery verified. Tests use disposable DB and isolated provider fixtures, not real sends. CI pending. Added CRM DSN to Compose.
+
+### Verification addendum — migrations 052–056
+- 052 attendance: 632c64c7b52be264a7bcd028849d0ebd4b47bc5a, CI runs 45865240568 and 45865240601 passed.
+- 053 guest dining: e000d795d4c7b6d694af0561933c214e1154c8bf, CI runs 45865338971 and 45865338820 passed.
+- 054 leave: 6576e0bde1915560220882846a2aa22df6fd7bef, CI runs 45865696936 and 45865696908 passed.
+- 055 platform CRM: afc4f01df8d32d83fd9352a83fd74428c732e1ac, CI runs 45865924773 and 45865924757 passed.
+- 056 email: ff6467b6d7bdd4d7049a93f584a510bec9783973, all four jobs in 45866261611 and separate restore run 45866261612 passed.
+- Exact committed migrations 052 through 056 applied to existing staging xfxqlcmsfkbvbybkrppq. Postflight: 88/88 ordinary Flow tables forced RLS, zero direct anon/authenticated table grants, zero enabled email accounts and zero active CRM operators. Verified restricted execution boundaries. Advisor INFO on intentionally default-deny private tables, no Flow findings in anon SECURITY DEFINER executable warning. No provider sends, model activation, actual staff attendance, prospects or customer data created.
+- Integration candidate PR #4 (a801cc9ce80a0e7e494df34c19b00d99d2f5c9bb) combines pinned backend and frontend heads plus route allowlist and actual loopback gateway/PostgreSQL HTTP test. CI pending. Main remains unchanged; hosted API origin not verified, no hosted acceptance claimed.
+
+## 2026-11-26 — Modal Model API compatibility
+- Chat adapter accepts regional workspace endpoint hosts on modal.direct, exact HTTPS /v1/chat/completions path, no userinfo/ports/query/fragment, sends combined proxy bearer credential. Existing modal.run authentication and separate voice endpoints unchanged. Existing bounded source selection and tool prohibition retained. No model hardcoded; no inference call or charge incurred. Reasoning controls vary by model and provider; no unverified provider-specific request fields added. Live connectivity and model ID remain pending; revoke previously exposed proxy credential and configure replacement in server secrets. CI pending.
+
+## 2026-11-26 — Platform subscription contract records
+- Migration 057 adds operator-recorded immutable plan versions and nonoverlapping property subscription terms, with exact minor-unit price, contractual included AI allowance, evidence references and idempotency. Owner/manager/finance can read their own current contract. No production pricing selected, no invoices/charges/renewal/payment verification or enforced allowance claimed; native hotel operations unaffected. Cancellation/amendments and recurring payment reconciliation remain separate work. Regression tests cover tenant and role separation, conflicting replay, overlap and honest payment/usage state. CI and hosted migration pending.
+
+## 2026-11-26 — Remaining work quarter one
+- Migration 057 staging verified: CI 45871072317, 45871072748 successful; exact committed migration applied; provisioner alone writes, operations reads, anon/authenticated denied.
+- Migration 058 adds immutable operator-authorized contract cancellation and permits replacement after effective termination; active cancellation revokes in-flight AI reservations. No external billing cancellation/refund implied.
+- Migration 059 enforces contract-period weighted AI allowance before provider invocation; all reserved attempts count, text=1 and voice=3. Existing pilot properties without a contract retain existing daily limits and explicit AI approval; properties with term history need a current term. No exact monetary/token budget claim. Native hotel workflows unaffected. CI and staging 058/059 pending. See docs/REMAINING_WORK_QUARTERS.md for fixed package count.
