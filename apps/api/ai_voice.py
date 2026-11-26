@@ -19,7 +19,10 @@ MAX_OUTPUT=4*1024*1024
 
 def endpoint(name,path):
     url=os.getenv(name,"")
-    parsed=urlsplit(url)
+    try:
+        parsed=urlsplit(url)
+    except ValueError:
+        raise ModelUnavailable("Voice endpoint unavailable") from None
     if (parsed.scheme!="https" or not parsed.hostname or not parsed.hostname.endswith(".modal.run")
         or parsed.netloc!=parsed.hostname or parsed.path!=path or parsed.query or parsed.fragment):
         raise ModelUnavailable("Voice endpoint unavailable")

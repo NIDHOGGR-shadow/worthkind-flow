@@ -63,7 +63,36 @@ def search_query(question):
 def handoff(reason):
     return {"status":"handoff","reason":reason,"answer":None,"sources":[],"human_handoff_required":True,"action_executed":False}
 
+# Reconciled deterministic safety rules from PR #1. These are conservative
+# routing rules, not a guarantee of detecting every emergency or secret.
+URGENT = re.compile(r"\b(fire|smoke|ambulance|medical emergency|heart attack|cannot breathe|can't breathe|gas leak|unsafe|assault|unconscious)\b", re.I)
+HUMAN = re.compile(r"\b(reception(?:ist)?|human|real person|speak to (staff|someone)|no ai|operator|manager)\b", re.I)
+SUPPORT = re.compile(r"\b(report|complaint|broken|not working|leak|dirty|missing|stolen|locked out|no (water|power)|help me)\b", re.I)
+PRIVATE = re.compile(r"\b(?:password|passcode|otp|pin|card number|passport|guest list|other guest|room number|bank account|api key|access token)\b|[\w.+-]+@[\w.-]+\.[a-z]{2,}|\d(?:[ -]?\d){6,}", re.I)
+
+def direct_handoff_reason(question):
+    if URGENT.search(question):
+        return "urgent_request"
+    if HUMAN.search(question):
+        return "human_requested"
+    if SUPPORT.search(question):
+        return "support_request"
+    if PRIVATE.search(question):
+        return "sensitive_request"
+    return None
+
 def answer(slug,body,subject=None,*,reserved_call=None,voice_renderer=None):
+    reason=direct_handoff_reason(body.question)
+    if reason:
+        # Voice has already reserved a quota entry and performed consented ASR.
+        # Never pass this transcript to chat inference or text-to-speech.
+        if reserved_call is not None:
+            try:
+                db("SELECT worthkind_flow.finish_ai_call(%s,%s,%s,%s::uuid[])",(slug,reserved_call,"abstained",[]))
+            except HTTPException:
+                pass
+        return {**handoff(reason),"next_action":("contact_reception_and_local_emergency_services"
+                                                  if reason=="urgent_request" else "direct_reception")}
     if not body.consent_to_model_processing:
         return handoff("consent_required")
     try:

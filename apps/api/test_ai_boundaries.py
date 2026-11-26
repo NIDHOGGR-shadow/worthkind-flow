@@ -45,6 +45,50 @@ class AIBoundaryTests(unittest.TestCase):
                 with patch.dict(os.environ,{"WF_MODAL_CHAT_URL":url}),self.assertRaises(ModelUnavailable):
                     configuration()
 
+    def test_direct_handoff_precedes_inference_and_database(self):
+        cases=[
+            ("There is a fire in the building","urgent_request"),
+            ("I want a human","human_requested"),
+            ("The shower is broken","support_request"),
+            ("My password is confidential","sensitive_request"),
+            ("Contact guest@example.invalid","sensitive_request"),
+        ]
+        with patch("ai_gateway.configuration") as provider,patch("ai_gateway.db") as db,patch("ai_gateway.select_sources") as model:
+            for question,reason in cases:
+                for subject in (None,"staff-subject"):
+                    with self.subTest(question=question,subject=subject):
+                        response=answer("hotel-a",Question(question=question,consent_to_model_processing=True),subject)
+                        self.assertEqual(response["reason"],reason)
+                        self.assertTrue(response["human_handoff_required"])
+                        self.assertFalse(response["action_executed"])
+                        self.assertIsNone(response["answer"])
+                        self.assertEqual(response["next_action"],"contact_reception_and_local_emergency_services" if reason=="urgent_request" else "direct_reception")
+            provider.assert_not_called()
+            db.assert_not_called()
+            model.assert_not_called()
+
+    def test_voice_transcript_handoff_finalizes_reservation_without_chat_or_speech(self):
+        with patch("ai_gateway.configuration") as provider,patch("ai_gateway.db") as db,patch("ai_gateway.select_sources") as model:
+            from unittest.mock import Mock
+            renderer=Mock()
+            response=answer("hotel-a",Question(question="I need a real person",consent_to_model_processing=True),reserved_call="call-id",voice_renderer=renderer)
+            self.assertEqual(response["reason"],"human_requested")
+            db.assert_called_once_with("SELECT worthkind_flow.finish_ai_call(%s,%s,%s,%s::uuid[])",("hotel-a","call-id","abstained",[]))
+            provider.assert_not_called()
+            model.assert_not_called()
+            renderer.assert_not_called()
+
+    def test_malformed_modal_endpoint_fails_closed(self):
+        with patch.dict(os.environ,{"WF_MODAL_ENABLED":"1","WF_MODAL_CHAT_URL":"https://[invalid"},clear=True):
+            with self.assertRaises(ModelUnavailable):
+                configuration()
+            result=answer("hotel-a",Question(question="When is breakfast?",consent_to_model_processing=True))
+            self.assertEqual(result["reason"],"model_unavailable")
+        from ai_voice import endpoint
+        with patch.dict(os.environ,{"WF_MODAL_ASR_URL":"https://[invalid"},clear=True):
+            with self.assertRaises(ModelUnavailable):
+                endpoint("WF_MODAL_ASR_URL","/transcribe")
+
     def test_redaction_and_search(self):
         text=sanitize("Breakfast? guest@example.invalid +234 801 234 5678")
         self.assertNotIn("guest@example.invalid",text)

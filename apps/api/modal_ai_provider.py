@@ -15,7 +15,10 @@ def configuration():
     model=os.getenv("WF_MODAL_CHAT_MODEL","")
     key=os.getenv("WF_MODAL_PROXY_KEY","")
     secret=os.getenv("WF_MODAL_PROXY_SECRET","")
-    parsed=urlsplit(url)
+    try:
+        parsed=urlsplit(url)
+    except ValueError:
+        raise ModelUnavailable("Model connection unavailable") from None
     if (os.getenv("WF_MODAL_ENABLED")!="1" or parsed.scheme!="https" or
         not parsed.hostname or not parsed.hostname.endswith(".modal.run") or parsed.netloc!=parsed.hostname or
         parsed.path!="/v1/chat/completions" or parsed.query or parsed.fragment or
