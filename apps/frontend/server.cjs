@@ -17,6 +17,7 @@ const allowed=[
  ["GET","/staff/cases"],["POST","/staff/cases/"+UUID+"/(?:claim|respond|control)"],
  ["GET","/staff/tickets"],["POST","/staff/tickets"],["GET","/staff/tickets/"+UUID],["POST","/staff/tickets/"+UUID+"/transition"],
  ["GET","/staff/settings"],["PUT","/staff/settings"],["POST","/staff/memberships/(?:invite|accept|revoke)"],
+ ["GET","/staff/handover-recipients"],["GET","/staff/handovers"],["POST","/staff/handovers"],["POST","/staff/handovers/"+UUID+"/decision"],
  ["GET","/staff/schedule"],["PUT","/staff/profiles/"+UUID],["POST","/staff/shifts"],["POST","/staff/shifts/"+UUID+"/cancel"],
  ["GET","/staff/rooms"],["PUT","/staff/rooms/"+UUID+"/state"],
  ["GET","/(?:content|rooms|menu|venues)"],
