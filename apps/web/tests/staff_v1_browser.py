@@ -188,6 +188,15 @@ def check_staff_v1(browser, base):
         elif path == prefix + "/venue-requests/" + CASE_ID + "/decision":
             state["venue"]="reviewed"
             route.fulfill(json={"id":CASE_ID,"state":"reviewed"})
+        elif path == prefix + "/reports/operations":
+            if not state.get("native_report"):
+                route.fulfill(status=404,json={"detail":"Fixture fallback"})
+            else:
+                route.fulfill(json={"scope":"native_property_records","as_of":"2026-11-26T15:00:00Z","cases":{"open":7,"queued":3,"escalated":1,"staff_resolved":2},"tickets":{"open":4,"overdue":1,"urgent_open":1},"rooms":{"registered":12,"out_of_service":1,"dirty":2,"native_occupied":5},"bookings":{"unexpired_holds":1,"confirmed":6},"dining":{"awaiting_acceptance":2,"in_service":1},"stock":{"active_items":5,"at_or_below_reorder":1},"handover_pending":1,"venue_requests_pending":2,"notification_outbox":{"pending":1,"failed":0,"dead_letter":0}})
+        elif path == prefix + "/reports/payment-evidence":
+            route.fulfill(json={"scope":"cumulative_verified_provider_evidence","as_of":"2026-11-26T15:00:00Z","settlement_verified":False,"open_exceptions":0,"groups":[{"mode":"test","currency":"NGN","payment_count":1,"verified_gross_minor":"500000","processed_refunds_minor":"100000","net_after_refunds_minor":"400000"}]})
+        elif path == prefix + "/platform-subscription":
+            route.fulfill(json={"status":"contract_recorded","payment_verified":False,"usage_allowance_enforced":True,"used_ai_units":3,"remaining_ai_units":97,"term":{"id":CASE_ID,"plan_name":"Synthetic plan","plan_code":"test","plan_version":1,"currency":"NGN","monthly_price_minor":"1000000","starts_at":"2026-11-01T00:00:00Z","ends_at":"2026-12-01T00:00:00Z","included_ai_calls":100}})
         elif path == prefix + "/finance" and state.get("overview_finance_denied"):
             route.fulfill(status=403,json={"detail":"Finance access denied"})
         elif path == prefix + "/finance":
@@ -443,6 +452,17 @@ def check_staff_v1(browser, base):
     expect(page.locator("#management-summary")).to_contain_text("Showing 7 verified sections")
     expect(page.locator("#management-summary")).not_to_contain_text("Issued invoices")
     state["overview_finance_denied"] = False
+    state["native_report"] = True
+    page.locator("#management-refresh").click()
+    expect(page.locator("#management-summary")).to_contain_text("Property-wide native records")
+    expect(page.locator("#management-summary")).to_contain_text("Native occupied rooms")
+    page.get_by_text("Verified payment evidence",exact=True).click()
+    page.locator("#payment-report-load").click()
+    expect(page.locator("#payment-report-records")).to_contain_text("Test provider evidence")
+    expect(page.locator("#payment-report-records")).to_contain_text("NGN 4,000.00")
+    page.get_by_text("Worthkind subscription and usage",exact=True).click()
+    page.locator("#subscription-load").click()
+    expect(page.locator("#subscription-records")).to_contain_text("Remaining units: 97")
     page.get_by_role("button",name="Open procurement",exact=True).click()
     expect(page.locator("#procurement-view")).to_be_visible()
     select_module("Procurement")
