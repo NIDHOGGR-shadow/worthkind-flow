@@ -1,7 +1,9 @@
 """Hotel-operated dining orders. No POS or payment confirmation is inferred."""
 from typing import Literal
 from uuid import UUID
-from fastapi import Header,HTTPException
+from fastapi import Header,HTTPException,Depends,Query
+from guest_records_pg import proof
+from guest_quota import enforce_guest_quota
 from pydantic import BaseModel,Field
 from psycopg.types.json import Jsonb
 from operations_pg import actor,command
@@ -30,6 +32,23 @@ class Transition(BaseModel):
 
 def install_dining_routes(app):
     base="/api/v1/properties/{slug}"
+    guest=base+"/guest/cases/{case_id}/dining/orders"
+    @app.post(guest,status_code=201,dependencies=[Depends(enforce_guest_quota)])
+    def guest_order(slug:str,case_id:UUID,body:Order,x_receipt_token:str|None=Header(None)):
+        if len({line.item_id for line in body.lines})!=len(body.lines):
+            raise HTTPException(422,"Duplicate menu item")
+        r=command("SELECT * FROM worthkind_flow.create_guest_dining_order(%s,%s,%s,%s,%s,%s)",
+                  (slug,case_id,proof(x_receipt_token),body.request_key,body.room_id,Jsonb([line.model_dump(mode="json") for line in body.lines])),guest=True)
+        return {"id":str(r[0]),"state":r[1],"total_minor":r[2],"currency":r[3],"duplicate":r[4],"payment_confirmed":False}
+
+    @app.get(guest,dependencies=[Depends(enforce_guest_quota)])
+    def guest_orders(slug:str,case_id:UUID,after:UUID|None=None,limit:int=Query(50,ge=1,le=100),x_receipt_token:str|None=Header(None)):
+        rows=command("SELECT * FROM worthkind_flow.guest_dining_orders(%s,%s,%s,%s,%s)",
+                     (slug,case_id,proof(x_receipt_token),after,limit+1),many=True,guest=True)
+        return {"orders":[{"id":str(r[0]),"room_id":str(r[1]) if r[1] else None,"state":r[2],"currency":r[3],
+                  "total_minor":r[4],"created_at":r[5].isoformat(),"lines":r[6]} for r in rows[:limit]],
+                "next_cursor":str(rows[limit-1][0]) if len(rows)>limit else None}
+
     @app.get(base+"/menu")
     def menu(slug:str):
         rows=command("SELECT * FROM worthkind_flow.list_menu(%s)",(slug,),many=True,public=True)

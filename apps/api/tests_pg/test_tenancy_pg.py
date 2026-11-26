@@ -24,7 +24,7 @@ import pytest
 
 MIGRATIONS = [
     Path(__file__).resolve().parents[3] / "db" / "migrations" / name
-    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql", "008_hotel_onboarding_settings.sql", "009_identity_provisioning.sql", "010_guest_quota.sql", "011_private_documents.sql", "012_operational_tickets.sql", "013_content_catalog.sql", "014_rooms_rates.sql", "015_rate_lookup_qualification.sql", "016_inventory_procurement.sql", "017_dining_kitchen.sql", "018_menu_lock_qualification.sql", "019_department_roles.sql", "020_staff_shifts.sql", "021_guest_preferences_feedback.sql", "022_reservation_intents.sql", "023_hotel_finance.sql", "024_events_recruitment.sql", "025_pms_accounts.sql", "026_reception_controls.sql", "027_payment_mode_boundaries.sql", "028_operations_read_contracts.sql", "029_native_booking_inventory.sql", "030_native_booking_changes.sql", "031_pos_receipt_evidence.sql", "032_purchase_batches.sql", "033_partial_refunds.sql", "034_native_stay_invoices.sql", "035_settlement_reconciliation.sql", "036_pms_reservation_evidence.sql", "037_native_stay_operations.sql", "038_pms_commands.sql", "039_provider_sync_guards.sql", "040_pos_refresh_worker.sql", "041_pos_cancellation_guard.sql", "042_pms_readback_recovery.sql", "043_provider_emergency_disable.sql", "044_ai_policy_and_retrieval.sql", "045_ai_automation_and_approvals.sql", "046_ai_retrieval_and_budget_guards.sql", "047_guest_resolution_decisions.sql", "048_staff_property_discovery.sql", "049_reception_handovers.sql", "050_management_reports.sql", "051_guest_department_tracking.sql", "052_staff_attendance.sql")
+    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql", "008_hotel_onboarding_settings.sql", "009_identity_provisioning.sql", "010_guest_quota.sql", "011_private_documents.sql", "012_operational_tickets.sql", "013_content_catalog.sql", "014_rooms_rates.sql", "015_rate_lookup_qualification.sql", "016_inventory_procurement.sql", "017_dining_kitchen.sql", "018_menu_lock_qualification.sql", "019_department_roles.sql", "020_staff_shifts.sql", "021_guest_preferences_feedback.sql", "022_reservation_intents.sql", "023_hotel_finance.sql", "024_events_recruitment.sql", "025_pms_accounts.sql", "026_reception_controls.sql", "027_payment_mode_boundaries.sql", "028_operations_read_contracts.sql", "029_native_booking_inventory.sql", "030_native_booking_changes.sql", "031_pos_receipt_evidence.sql", "032_purchase_batches.sql", "033_partial_refunds.sql", "034_native_stay_invoices.sql", "035_settlement_reconciliation.sql", "036_pms_reservation_evidence.sql", "037_native_stay_operations.sql", "038_pms_commands.sql", "039_provider_sync_guards.sql", "040_pos_refresh_worker.sql", "041_pos_cancellation_guard.sql", "042_pms_readback_recovery.sql", "043_provider_emergency_disable.sql", "044_ai_policy_and_retrieval.sql", "045_ai_automation_and_approvals.sql", "046_ai_retrieval_and_budget_guards.sql", "047_guest_resolution_decisions.sql", "048_staff_property_discovery.sql", "049_reception_handovers.sql", "050_management_reports.sql", "051_guest_department_tracking.sql", "052_staff_attendance.sql", "053_guest_dining_orders.sql")
 ]
 
 
@@ -1642,3 +1642,35 @@ def test_staff_attendance_self_only_and_idempotent(pg, oidc_rig, monkeypatch):
     with pytest.raises(errors.InsufficientPrivilege):
         with command_session(pg,"wf_guest_api"):
             pg.execute("SELECT * FROM worthkind_flow.staff_attendance")
+
+
+def test_guest_dining_receipt_and_authoritative_menu(pg, seeded):
+    from psycopg.types.json import Jsonb
+    prop=seeded["property_a"]
+    case=seeded["case_a"]
+    owner="idp:hotel-a-owner"
+    pg.execute("UPDATE worthkind_flow.guest_cases SET kind='food' WHERE id=%s",(case,))
+    item=pg.execute("SELECT id FROM worthkind_flow.save_menu_item(%s,%s,'rice','Rice','Fresh rice',2500,'NGN',true,0)",(owner,"hotel-a")).fetchone()[0]
+    sql="SELECT * FROM worthkind_flow.create_guest_dining_order(%s,%s,%s,%s,%s,%s)"
+    lines=Jsonb([{"item_id":str(item),"quantity":2}])
+    params=("hotel-a",case,"b"*64,"guest-dining-001",None,lines)
+    with pytest.raises(errors.NoDataFound):
+        with command_session(pg,"wf_guest_api"):
+            pg.execute(sql,("hotel-a",case,"c"*64,"guest-dining-001",None,lines))
+    with pytest.raises(errors.NoDataFound):
+        with command_session(pg,"wf_guest_api"):
+            pg.execute(sql,("hotel-a",case,"b"*64,"guest-dining-001",uuid4(),lines))
+    with command_session(pg,"wf_guest_api"):
+        order,state,total,currency,dup=pg.execute(sql,params).fetchone()
+        assert (state,total,currency,dup)==("submitted",5000,"NGN",False)
+        assert pg.execute(sql,params).fetchone()==(order,"submitted",5000,"NGN",True)
+    with pytest.raises(errors.UniqueViolation):
+        with command_session(pg,"wf_guest_api"):
+            pg.execute(sql,(*params[:-1],Jsonb([{"item_id":str(item),"quantity":3}])))
+    assert pg.execute("SELECT created_by,guest_case_id FROM worthkind_flow.dining_orders WHERE id=%s",(order,)).fetchone()==(None,case)
+    assert pg.execute("SELECT actor,guest_case_id FROM worthkind_flow.dining_events WHERE order_id=%s",(order,)).fetchone()==(None,case)
+    assert pg.execute("SELECT worthkind_flow.transition_dining_order(%s,%s,%s,'accept')",(owner,"hotel-a",order)).fetchone()[0]=="accepted"
+    with command_session(pg,"wf_guest_api"):
+        assert pg.execute("SELECT order_id,state,total_minor FROM worthkind_flow.guest_dining_orders(%s,%s,%s,NULL,10)",("hotel-a",case,"b"*64)).fetchall()==[(order,"accepted",5000)]
+        assert pg.execute("SELECT order_id FROM worthkind_flow.guest_dining_orders(%s,%s,%s,NULL,10)",("hotel-b",seeded["case_b"],"b"*64)).fetchall()==[]
+        assert pg.execute(sql,params).fetchone()==(order,"accepted",5000,"NGN",True)
