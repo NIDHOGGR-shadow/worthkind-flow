@@ -24,7 +24,7 @@ import pytest
 
 MIGRATIONS = [
     Path(__file__).resolve().parents[3] / "db" / "migrations" / name
-    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql", "008_hotel_onboarding_settings.sql", "009_identity_provisioning.sql", "010_guest_quota.sql", "011_private_documents.sql", "012_operational_tickets.sql", "013_content_catalog.sql", "014_rooms_rates.sql", "015_rate_lookup_qualification.sql", "016_inventory_procurement.sql", "017_dining_kitchen.sql", "018_menu_lock_qualification.sql", "019_department_roles.sql", "020_staff_shifts.sql", "021_guest_preferences_feedback.sql", "022_reservation_intents.sql", "023_hotel_finance.sql", "024_events_recruitment.sql", "025_pms_accounts.sql", "026_reception_controls.sql", "027_payment_mode_boundaries.sql", "028_operations_read_contracts.sql", "029_native_booking_inventory.sql", "030_native_booking_changes.sql", "031_pos_receipt_evidence.sql", "032_purchase_batches.sql", "033_partial_refunds.sql", "034_native_stay_invoices.sql", "035_settlement_reconciliation.sql", "036_pms_reservation_evidence.sql", "037_native_stay_operations.sql", "038_pms_commands.sql", "039_provider_sync_guards.sql", "040_pos_refresh_worker.sql", "041_pos_cancellation_guard.sql", "042_pms_readback_recovery.sql", "043_provider_emergency_disable.sql", "044_ai_policy_and_retrieval.sql", "045_ai_automation_and_approvals.sql", "046_ai_retrieval_and_budget_guards.sql", "047_guest_resolution_decisions.sql", "048_staff_property_discovery.sql", "049_reception_handovers.sql", "050_management_reports.sql", "051_guest_department_tracking.sql", "052_staff_attendance.sql", "053_guest_dining_orders.sql", "054_staff_leave.sql")
+    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql", "008_hotel_onboarding_settings.sql", "009_identity_provisioning.sql", "010_guest_quota.sql", "011_private_documents.sql", "012_operational_tickets.sql", "013_content_catalog.sql", "014_rooms_rates.sql", "015_rate_lookup_qualification.sql", "016_inventory_procurement.sql", "017_dining_kitchen.sql", "018_menu_lock_qualification.sql", "019_department_roles.sql", "020_staff_shifts.sql", "021_guest_preferences_feedback.sql", "022_reservation_intents.sql", "023_hotel_finance.sql", "024_events_recruitment.sql", "025_pms_accounts.sql", "026_reception_controls.sql", "027_payment_mode_boundaries.sql", "028_operations_read_contracts.sql", "029_native_booking_inventory.sql", "030_native_booking_changes.sql", "031_pos_receipt_evidence.sql", "032_purchase_batches.sql", "033_partial_refunds.sql", "034_native_stay_invoices.sql", "035_settlement_reconciliation.sql", "036_pms_reservation_evidence.sql", "037_native_stay_operations.sql", "038_pms_commands.sql", "039_provider_sync_guards.sql", "040_pos_refresh_worker.sql", "041_pos_cancellation_guard.sql", "042_pms_readback_recovery.sql", "043_provider_emergency_disable.sql", "044_ai_policy_and_retrieval.sql", "045_ai_automation_and_approvals.sql", "046_ai_retrieval_and_budget_guards.sql", "047_guest_resolution_decisions.sql", "048_staff_property_discovery.sql", "049_reception_handovers.sql", "050_management_reports.sql", "051_guest_department_tracking.sql", "052_staff_attendance.sql", "053_guest_dining_orders.sql", "054_staff_leave.sql", "055_platform_crm.sql")
 ]
 
 
@@ -65,6 +65,8 @@ def pg():
         conn.execute("GRANT wf_public_content TO wf_ci_guest")
         conn.execute("GRANT wf_ai_gateway TO wf_ci_guest")
         conn.execute("GRANT wf_ai_policy TO wf_ci_staff")
+        conn.execute("CREATE ROLE wf_ci_crm LOGIN NOINHERIT PASSWORD 'worthkind_ci_crm_only'")
+        conn.execute("GRANT wf_platform_crm TO wf_ci_crm")
         yield conn
 
 
@@ -1707,3 +1709,38 @@ def test_staff_leave_independent_approval_and_schedule_guard(pg, oidc_rig, monke
     assert client.get(base+"/leave",headers=headers("idp:hotel-a-housekeeper")).json()["requests"]==[]
     assert client.post(path,json={"action":"cancel"},headers=owner).json()["state"]=="cancelled"
     assert client.post(base+"/shifts",json=shift,headers=owner).status_code==201
+
+
+def test_platform_crm_consent_and_operator_boundary(pg, oidc_rig, monkeypatch):
+    client,key,source=oidc_rig
+    monkeypatch.setenv("WF_PLATFORM_CRM_POSTGRES_DSN",make_conninfo(os.environ["WF_TEST_POSTGRES_DSN"],user="wf_ci_crm",password="worthkind_ci_crm_only"))
+    subject="idp:platform-crm-test"
+    sales=auth_header(signed_token(key,subject))
+    hotel=auth_header(signed_token(key,"idp:hotel-a-owner"))
+    base="/api/v1/platform/crm/prospects"
+    assert client.get(base,headers=hotel).status_code==403
+    assert client.get(base,headers=sales).status_code==403
+    pg.execute("SELECT worthkind_flow.set_crm_operator(%s,true,'CI operator approval')",(subject,))
+    payload={"account_key":"test-"+uuid4().hex,"hotel_name":"Test Hotel","source_reference":"CI referral","contact":"contact@example.invalid"}
+    created=client.post(base,json=payload,headers=sales)
+    assert created.status_code==201,created.text
+    pid=created.json()["id"]
+    assert client.post(base,json=payload,headers=sales).json()["duplicate"]
+    assert client.post(base,json={**payload,"hotel_name":"Changed hotel"},headers=sales).status_code==409
+    def change(revision,action,value):
+        return client.post(base+"/"+pid+"/change",json={"request_key":str(uuid4()),"revision":revision,"action":action,"value":value,"evidence_reference":"CI verified evidence"},headers=sales)
+    assert change(1,"stage","discovery").json()["stage"]=="discovery"
+    assert change(2,"stage","consented_waitlist").status_code==409
+    assert change(2,"consent","granted").json()["outreach_allowed"]
+    assert change(3,"stage","consented_waitlist").json()["stage"]=="consented_waitlist"
+    assert not change(4,"consent","revoked").json()["outreach_allowed"]
+    assert change(5,"stage","written_pilot_interest").status_code==409
+    entries=client.get(base,headers=sales).json()["prospects"]
+    assert next(x for x in entries if x["id"]==pid)["contact"]==payload["contact"]
+    assert payload["contact"].encode() not in pg.execute("SELECT encrypted_contact FROM worthkind_flow.crm_prospects WHERE id=%s",(pid,)).fetchone()[0]
+    with pytest.raises(errors.InsufficientPrivilege):
+        with pg.transaction():
+            pg.execute("SET LOCAL ROLE wf_platform_crm")
+            pg.execute("SELECT * FROM worthkind_flow.guest_cases")
+    pg.execute("SELECT worthkind_flow.set_crm_operator(%s,false,'CI operator revocation')",(subject,))
+    assert client.get(base,headers=sales).status_code==403

@@ -565,3 +565,6 @@ install_ai_automation_routes(app)
 
 from ai_voice import install_voice_routes
 install_voice_routes(app)
+
+from platform_crm_pg import install_platform_crm
+install_platform_crm(app)

@@ -174,3 +174,6 @@ Next: investigate Actions issue #68 and obtain executed passing CI for browser P
 
 ## 2026-11-26 — Staff leave requests
 - Migration 054 adds self-service leave, independent owner/manager/HR decisions, withdraw before decision and manager cancellation before start. Approved leave blocks overlapping scheduled shifts and requires preexisting shifts resolved before approval; no payroll or entitlement calculation. Request and decision replay is idempotent and audited. Signed-token PostgreSQL/API regression added; CI and hosted acceptance pending.
+
+## 2026-11-26 — Platform B2B CRM
+- Migration 055 creates separate platform CRM runtime/admin roles (not hotel ownership), explicit operator provisioning/revocation, prospect deduplication by operator-supplied account key, encrypted contact, evidence-backed consent and revocation, revisioned/idempotent sales stage changes and pagination. No automatic outreach, public waitlist, contract signature, attribution or billing claimed. Consent must precede waitlist/pilot stage; closing or revocation disables outreach. Dedicated runtime login and operator enrollment required for hosted use. PostgreSQL/API regression added; CI and hosted acceptance pending.

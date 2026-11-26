@@ -19,6 +19,7 @@ ROLE_CONNECTIONS = (
 
 
 OPTIONAL_PROVIDER_ROLES = (
+    ("WF_PLATFORM_CRM_POSTGRES_DSN", "wf_platform_crm"),
     ("WF_PAYMENT_PROVIDER_POSTGRES_DSN", "wf_payment_provider"),
     ("WF_POS_PROVIDER_POSTGRES_DSN", "wf_pos_provider"),
     ("WF_PMS_PROVIDER_POSTGRES_DSN", "wf_pms_provider"),
