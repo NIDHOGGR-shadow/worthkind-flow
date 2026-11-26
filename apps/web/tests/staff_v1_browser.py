@@ -216,6 +216,20 @@ def check_staff_v1(browser, base):
                 assert request.post_data_json["target_membership_id"] == MEMBER_ID
             state["case"] = "claimed" if action == "transfer" else "escalated"
             route.fulfill(json={"case_id": CASE_ID, "state": state["case"]})
+        elif path == prefix + "/handover-recipients":
+            route.fulfill(json={"recipients":[{"membership_id":MEMBER_ID,"role":"reception","display_name":"Synthetic staff"}],"next_cursor":None})
+        elif path == prefix + "/handovers" and request.method == "POST":
+            body=request.post_data_json
+            assert body["recipient_id"]==MEMBER_ID and body["case_id"]==CASE_ID and body["note"]=="Follow up with the guest"
+            state["handover"]={"id":TICKET_ID,"sender_id":CASE_ID,"recipient_id":MEMBER_ID,"case_id":CASE_ID,"note":body["note"],"state":"pending","created_at":"2026-11-26T15:00:00Z","decided_at":None,"decided_by":None}
+            route.fulfill(json={"id":TICKET_ID,"state":"pending","duplicate":False})
+        elif path == prefix + "/handovers":
+            h=state.get("handover")
+            route.fulfill(json={"handovers":[h] if h and (h["state"]=="pending" or "pending=false" in request.url) else [],"next_cursor":None})
+        elif path == prefix + "/handovers/" + TICKET_ID + "/decision":
+            assert request.post_data_json=={"action":"acknowledge"}
+            state["handover"].update(state="acknowledged",decided_at="2026-11-26T15:01:00Z",decided_by=MEMBER_ID)
+            route.fulfill(json={"id":TICKET_ID,"state":"acknowledged","duplicate":False})
         elif path == prefix + "/schedule":
             route.fulfill(json={"members": [{"membership_id": MEMBER_ID, "role": "reception",
                                            "state": "active", "display_name": "Synthetic staff"}],
@@ -305,6 +319,17 @@ def check_staff_v1(browser, base):
     page.locator("#reason-"+CASE_ID).fill("Transfer to named colleague")
     page.get_by_role("button",name="Transfer",exact=True).click()
     expect(page.locator("#v1-cases")).to_contain_text("claimed")
+    page.get_by_role("button",name="Prepare handover",exact=True).click()
+    expect(page.locator("#handover-case")).to_have_value(CASE_ID)
+    page.get_by_role("button",name="Find handover colleagues",exact=True).click()
+    page.locator("#handover-recipient").select_option(MEMBER_ID)
+    page.locator("#handover-note").fill("Follow up with the guest")
+    page.locator("#handover-submit").click()
+    expect(page.locator("#handover-list")).to_contain_text("Follow up with the guest")
+    page.get_by_role("button",name="Acknowledge handover",exact=True).click()
+    expect(page.locator("#handover-result")).to_contain_text("acknowledged")
+    page.locator("#handover-pending").uncheck()
+    expect(page.locator("#handover-list")).to_contain_text("acknowledged")
     page.get_by_role("button",name="Create linked department task",exact=True).click()
     expect(page.locator("#tickets-view")).to_be_visible()
     expect(page.locator("#ticket-origin")).to_have_value(CASE_ID)
@@ -491,6 +516,8 @@ def check_staff_v1(browser, base):
     expect(page.locator("#v1-cases")).to_be_empty()
     expect(page.locator("#v1-tickets")).to_be_empty()
     expect(page.locator("#staff-roster")).to_be_empty()
+    expect(page.locator("#handover-list")).to_be_empty()
+    expect(page.locator("#handover-recipient option")).to_have_count(1)
     expect(page.locator("#profile-member option")).to_have_count(1)
     expect(page.locator("#shift-member option")).to_have_count(1)
     expect(page.locator("#case-search")).to_have_value("")
