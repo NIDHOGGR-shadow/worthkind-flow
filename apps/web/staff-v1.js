@@ -4,7 +4,7 @@
   const say=(id,message)=>{el(id).textContent=message;};
   const node=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=String(text);if(cls)n.className=cls;return n;};
   const ctx=staffContext();
-  let roster=null,rooms=null,range=null;
+  let roster=null,rooms=null,range=null,propertyRows=[],propertyCursor=null;
   let session,api,view="cases",cases=null,tickets=null,settings=null,selectedCase=null,pendingTicket=null,expiryTimer,authBusy=false;
   const randomKey=()=>Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,"0")).join("");
   const describe=s=>String(s).replaceAll("_"," ");
@@ -35,7 +35,8 @@
     el("ticket-discard").hidden=!pendingTicket;
     commerce.controls();management.controls();native.controls();evidence.controls();documents.controls();aiStudio.controls();
   }
-  function localExit(message){
+  function clearProperties(){propertyRows=[];propertyCursor=null;el("property-discovery-list").replaceChildren();el("property-more").hidden=true;say("property-discovery-status","Find properties linked to your account.");}
+  function localExit(message){clearProperties();
     clearTimeout(expiryTimer);session?.clear();ctx.select("");clearData();
     el("staff-slug").value="";el("password").value="";el("email").value="";
     say("property-label","No hotel selected.");say("staff-message","");
@@ -69,6 +70,7 @@
       if(c.contact)card.append(node("p",c.contact,"staff-meta"));
       const message=node("div",undefined,"communication-message");message.append(node("p","Guest request","communication-author"),node("p",c.details||"No request details returned."));card.append(message);
       if(typeof c.staff_reply==="string"&&c.staff_reply.trim()){const reply=node("div",undefined,"communication-message staff-reply");reply.append(node("p","Latest recorded staff response","communication-author"),node("p",c.staff_reply));card.append(reply);}
+      if(c.status==="resolved"){const closure=node("div",undefined,"communication-message");closure.append(node("p","Guest confirmation","communication-author"));const status=node("p","Check whether the guest confirmed resolution.");const b=node("button","Check guest confirmation","button secondary");b.type="button";b.addEventListener("click",()=>{if(ctx.busy)return;run(slug=>api.resolution(slug,c.id),d=>{status.textContent=d.guest_confirmed?"Guest confirmed resolution.":d.awaiting_guest_confirmation?"Awaiting guest confirmation.":d.guest_decision==="reopen"?"Guest reopened this request. Refresh your inbox.":"No confirmation recorded.";});});closure.append(status,b);card.append(closure);}
       const ref=node("details"),refTitle=node("summary","Request reference");ref.append(refTitle,node("p",c.id,"staff-meta"));card.append(ref);
       const ticketButton=node("button","Create linked department task","button secondary");ticketButton.type="button";ticketButton.addEventListener("click",()=>{if(ctx.busy||pendingTicket)return;if(["ticket-subject","ticket-description","ticket-origin"].some(id=>el(id).value.trim())&&!confirm("Replace your unfinished department task draft?"))return;el("create-ticket").reset();el("ticket-origin").value=c.id;el("ticket-subject").value=("Guest request: "+describe(c.kind)).slice(0,160);el("ticket-description").value=(c.details||"Follow up on this guest request.").slice(0,3000);el("ticket-category").value="reception";showView("tickets");el("create-ticket").closest("details").open=true;el("ticket-subject").focus();say("staff-message","Review the department and share only the details needed to complete this task.");});card.append(ticketButton);
       if(c.status==="queued"){const b=node("button","Claim case","button primary");b.type="button";b.addEventListener("click",()=>mutate(()=>api.caseAction(ctx.slug,c.id,"claim"),loadCases,"Case claimed by server."));card.append(b);}
@@ -211,13 +213,33 @@
   el("case-search").addEventListener("input",renderCases);
   el("ticket-search").addEventListener("input",renderTickets);
   document.querySelectorAll("[data-view]").forEach(b=>b.addEventListener("click",()=>{if(!ctx.busy)showView(b.dataset.view);}));
-  el("property-form").addEventListener("submit",e=>{
-    e.preventDefault();if(ctx.busy)return;
-    const slug=el("staff-slug").value.trim();
-    if(!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)||slug.length>100)return;
-    if((pendingTicket||commerce.pending||management.pending||native.pending||evidence.pending||documents.pending||aiStudio.pending)&&!confirm("An unconfirmed ticket, dining order, stock operation, room hold, provider command or document upload may already exist. Switching property discards its local retry key. Continue?"))return;
-    ctx.select(slug);clearData();say("property-label","Selected: "+slug+" · Access checked by each server request.");say("staff-message","");controls();
-  });
+  function selectProperty(slug){
+    if(ctx.busy||authBusy||!session?.signedIn)return false;
+    if(!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)||slug.length>100)return false;
+    if((pendingTicket||commerce.pending||management.pending||native.pending||evidence.pending||documents.pending||aiStudio.pending)&&!confirm("An unconfirmed operation may already exist. Switching property discards its local retry key. Continue?"))return false;
+    ctx.select(slug);clearData();el("staff-slug").value=slug;
+    const p=propertyRows.find(x=>x.slug===slug);
+    say("property-label",p?p.display_name+" · "+describe(p.role)+" · "+p.time_zone:"Selected: "+slug+" · Access checked by each server request.");say("staff-message","");controls();return true;
+  }
+  function renderProperties(){
+    const root=el("property-discovery-list");root.replaceChildren();
+    for(const p of propertyRows){const card=node("article",undefined,"property-choice");const info=node("div");info.append(node("strong",p.display_name),node("p",describe(p.role)+" · "+p.time_zone+(p.membership_state==="invited"?" · Invitation pending":"")));const b=node("button",p.membership_state==="invited"?"Review invitation":"Open hotel","button secondary");b.type="button";b.addEventListener("click",()=>{if(!selectProperty(p.slug))return;if(p.membership_state==="invited"){showView("memberships");say("staff-message","Accept your invitation before accessing hotel records.");}else{showView(["owner","manager"].includes(p.role)?"management":"cases");}});card.append(info,b);root.append(card);}
+    el("property-more").hidden=!propertyCursor;
+    say("property-discovery-status",propertyRows.length?propertyRows.length+" linked hotel"+(propertyRows.length===1?"":"s")+(propertyCursor?" · More available":""):"No linked hotels returned. Ask your hotel administrator about an invitation.");
+  }
+  async function discoverProperties(more=false){
+    if(ctx.busy||authBusy||!session?.signedIn)return;
+    const stamp=ctx.stamp(),cursor=more?propertyCursor:null;if(more&&!cursor)return;
+    if(!more)clearProperties();
+    say("property-discovery-status","Finding your hotels…");
+    authBusy=true;controls();
+    try{const d=await api.properties(cursor);if(!ctx.isCurrent(stamp)||!session?.signedIn)return;
+      const map=new Map(propertyRows.map(p=>[p.slug,p]));for(const p of d.properties)map.set(p.slug,p);propertyRows=[...map.values()];propertyCursor=d.next_cursor;renderProperties();
+    }catch(e){if(ctx.isCurrent(stamp)){if(e.status===401)localExit("Session expired. Sign in again.");else say("property-discovery-status",e.message+" You can still enter a known hotel code.");}}
+    finally{authBusy=false;controls();}
+  }
+  el("property-discover").addEventListener("click",()=>discoverProperties());el("property-more").addEventListener("click",()=>discoverProperties(true));
+  el("property-form").addEventListener("submit",e=>{e.preventDefault();selectProperty(el("staff-slug").value.trim());});
   el("load-cases").addEventListener("click",loadCases);el("case-filter").addEventListener("change",renderCases);
   el("load-tickets").addEventListener("click",loadTickets);el("ticket-filter").addEventListener("change",renderTickets);el("ticket-status-filter").addEventListener("change",renderTickets);
   el("load-settings").addEventListener("click",loadSettings);
@@ -245,7 +267,7 @@
     catch(e){say("login-status",e.message);}finally{authBusy=false;controls();}
   });
   el("signout").addEventListener("click",async()=>{if(authBusy)return;if((pendingTicket||commerce.pending||management.pending||native.pending||evidence.pending||documents.pending||aiStudio.pending)&&!confirm("A ticket, dining order, stock operation, room hold, provider command or document upload is unconfirmed. Signing out discards its local retry key, not the server record. Continue?"))return;authBusy=true;const task=session.signOut();localExit("Signed out of this workspace.");const revoked=await task;authBusy=false;controls();if(!revoked)say("login-status","Signed out locally. Provider session revocation could not be confirmed.");});
-  window.addEventListener("pagehide",()=>{clearTimeout(expiryTimer);session?.clear();ctx.select("");clearData();});
+  window.addEventListener("pagehide",()=>{clearProperties();clearTimeout(expiryTimer);session?.clear();ctx.select("");clearData();});
   window.addEventListener("pageshow",e=>{if(e.persisted)localExit("Sign in again to access staff records.");});
   (async()=>{try{const r=await fetch(new URL("./staff-auth-config.json",location.href),{cache:"no-store",credentials:"same-origin",redirect:"error"});if(!r.ok)throw staffError("Staff identity configuration unavailable.");session=staffSession(window.fetch.bind(window),await r.json());api=staffApi(window.fetch.bind(window),session);say("login-status","Sign in with your confirmed hotel identity.");}catch{say("login-status","Staff sign-in is unavailable until an authorized identity provider is configured.");}finally{controls();}})();
 })();
