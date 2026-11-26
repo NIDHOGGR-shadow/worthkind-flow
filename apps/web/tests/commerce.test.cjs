@@ -81,3 +81,9 @@ test("partial refund is keyed and invoice void verifies returned identity and st
  await assert.rejects(api.requestRefund("hotel-a",id,"Synthetic reason",0,"refund-fixture-key"));
  await api.voidInvoice("hotel-a",id,"Synthetic void reason");assert.equal(calls.length,2);
 });
+
+test("catalog preserves independently verified sections when one service fails",async()=>{
+ const api=commerceApi(async url=>url.endsWith("/menu")?{ok:false,status:503}:ok(url.endsWith("/content")?{content:[{key:"hotel",content:{title:"Hotel",body:"Published hotel information"}}]}:url.endsWith("/rooms")?{rooms:[{id,name:"Deluxe",max_guests:2}]}:{venues:[]}),identity);
+ const d=await api.catalog("hotel-a");assert.equal(d.rooms[0].name,"Deluxe");assert.equal(d.content.length,1);assert.deepEqual(d.failed,["menu"]);assert.deepEqual(d.menu,[]);
+ await assert.rejects(commerceApi(async()=>({ok:false,status:503}),identity).catalog("hotel-a"));
+});
