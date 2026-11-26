@@ -5,6 +5,7 @@
   const node=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=String(text);if(cls)n.className=cls;return n;};
   const ctx=staffContext();
   let roster=null,rooms=null,range=null,propertyRows=[],propertyCursor=null;
+  let handoverRows=[],handoverPeople=[],handoverCursor=null,peopleCursor=null,pendingHandover=null;
   let session,api,view="cases",cases=null,tickets=null,settings=null,selectedCase=null,pendingTicket=null,expiryTimer,authBusy=false;
   const randomKey=()=>Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,"0")).join("");
   const describe=s=>String(s).replaceAll("_"," ");
@@ -14,7 +15,7 @@
   const evidence=initProviderEvidence({session:()=>session,ctx,run,mutate});
   const documents=initPrivateDocuments({session:()=>session,ctx,run});
   const aiStudio=initAiStudio({session:()=>session,ctx,run});
-  function clearData(){
+  function clearData(){clearHandovers();
     commerce.clear();management.clear();native.clear();evidence.clear();documents.clear();aiStudio.clear();
     roster=null;rooms=null;range=null;el("staff-roster").replaceChildren();el("staff-shifts").replaceChildren();el("staff-rooms").replaceChildren();el("staff-profile-form").reset();el("shift-form").reset();el("schedule-range").reset();renderStaffSelectors();
     cases=null;tickets=null;settings=null;selectedCase=null;el("case-search").value="";el("ticket-search").value="";say("ticket-summary","");el("case-filter").value="";el("ticket-filter").value="";el("ticket-status-filter").value="";
@@ -33,7 +34,7 @@
     el("ticket-fields").disabled=locked||!!pendingTicket;
     el("ticket-create").textContent=pendingTicket?"Retry unchanged ticket":"Create ticket";
     el("ticket-discard").hidden=!pendingTicket;
-    commerce.controls();management.controls();native.controls();evidence.controls();documents.controls();aiStudio.controls();
+    handoverControls(locked);commerce.controls();management.controls();native.controls();evidence.controls();documents.controls();aiStudio.controls();
   }
   function clearProperties(){propertyRows=[];propertyCursor=null;el("property-discovery-list").replaceChildren();el("property-more").hidden=true;say("property-discovery-status","Find properties linked to your account.");}
   function localExit(message){clearProperties();
@@ -53,7 +54,7 @@
   }
   el("staff-module-select").addEventListener("change",e=>{if(!ctx.busy&&Array.from(document.querySelectorAll("[data-view]")).some(n=>n.dataset.view===e.target.value))showView(e.target.value);});
   function renderCases(){
-    const root=el("v1-cases");root.replaceChildren();if(!cases)return;
+    const root=el("v1-cases");root.replaceChildren();renderHandoverCases();if(!cases)return;
     const q=el("case-search").value.trim().toLowerCase();
     const filtered=cases.cases.filter(c=>(!el("case-filter").value||c.status===el("case-filter").value)&&(!q||[c.customer_name,c.id,c.kind,c.details].some(v=>typeof v==="string"&&v.toLowerCase().includes(q))));
     say("case-summary",filtered.length+" of "+cases.cases.length+" returned cases · Role: "+cases.staff_role+" · Maximum 100 records");
@@ -73,6 +74,7 @@
       if(c.status==="resolved"){const closure=node("div",undefined,"communication-message");closure.append(node("p","Guest confirmation","communication-author"));const status=node("p","Check whether the guest confirmed resolution.");const b=node("button","Check guest confirmation","button secondary");b.type="button";b.addEventListener("click",()=>{if(ctx.busy)return;run(slug=>api.resolution(slug,c.id),d=>{status.textContent=d.guest_confirmed?"Guest confirmed resolution.":d.awaiting_guest_confirmation?"Awaiting guest confirmation.":d.guest_decision==="reopen"?"Guest reopened this request. Refresh your inbox.":"No confirmation recorded.";});});closure.append(status,b);card.append(closure);}
       const ref=node("details"),refTitle=node("summary","Request reference");ref.append(refTitle,node("p",c.id,"staff-meta"));card.append(ref);
       const ticketButton=node("button","Create linked department task","button secondary");ticketButton.type="button";ticketButton.addEventListener("click",()=>{if(ctx.busy||pendingTicket)return;if(["ticket-subject","ticket-description","ticket-origin"].some(id=>el(id).value.trim())&&!confirm("Replace your unfinished department task draft?"))return;el("create-ticket").reset();el("ticket-origin").value=c.id;el("ticket-subject").value=("Guest request: "+describe(c.kind)).slice(0,160);el("ticket-description").value=(c.details||"Follow up on this guest request.").slice(0,3000);el("ticket-category").value="reception";showView("tickets");el("create-ticket").closest("details").open=true;el("ticket-subject").focus();say("staff-message","Review the department and share only the details needed to complete this task.");});card.append(ticketButton);
+      if(c.status!=="resolved"){const handover=node("button","Prepare handover","button secondary");handover.type="button";handover.addEventListener("click",()=>{if(ctx.busy||pendingHandover)return;el("handover-panel").open=true;renderHandoverCases();el("handover-case").value=c.id;el("handover-note").focus();});card.append(handover);}
       if(c.status==="queued"){const b=node("button","Claim case","button primary");b.type="button";b.addEventListener("click",()=>mutate(()=>api.caseAction(ctx.slug,c.id,"claim"),loadCases,"Case claimed by server."));card.append(b);}
       if(c.status==="claimed"){
         const form=node("form"),label=node("label","Record a response"),field=node("textarea");field.id="reply-"+c.id;label.htmlFor=field.id;field.required=true;field.minLength=2;field.maxLength=3000;field.rows=3;
@@ -89,12 +91,10 @@
           const tl=node("label","Transfer to");target=node("select");target.id="target-"+c.id;tl.htmlFor=target.id;target.append(new Option("Choose a colleague",""));box.append(tl,target);
           const hint=node("p","Transfer is limited to active reception staff and managers. A listed colleague is not necessarily available.","staff-meta");
           const load=node("button","Find colleagues","button secondary");load.type="button";box.append(load,hint);
-          load.addEventListener("click",async()=>{if(ctx.busy)return;target.replaceChildren(new Option("Choose a colleague",""));const now=Date.now();await run(slug=>api.schedule(slug,new Date(now-86400000).toISOString(),new Date(now+86400000).toISOString()),data=>{
-            const people=data.members.filter(m=>m.state==="active"&&["owner","manager","reception"].includes(m.role)&&typeof m.display_name==="string"&&m.display_name.trim());
-            for(const m of people){target.append(new Option(m.display_name+" · "+describe(m.role),m.membership_id));}
-            hint.textContent=people.length?"Select an authorized roster member. Duty or availability is not confirmed.":"No named colleagues returned for your access. Escalate to a manager instead.";
-            if(cases?.staff_role==="reception")hint.textContent="Your roster access may include only your own profile. Escalate if the intended colleague is not listed.";
-          },"Loading authorized roster…");});
+          let cursor=null;load.addEventListener("click",async()=>{if(ctx.busy)return;if(!cursor)target.replaceChildren(new Option("Choose a colleague",""));await run(slug=>api.handoverRecipients(slug,cursor),data=>{
+            for(const m of data.recipients){if(![...target.options].some(o=>o.value===m.membership_id))target.append(new Option((m.display_name||"Staff "+m.membership_id.slice(0,8))+" · "+describe(m.role),m.membership_id));}
+            cursor=data.next_cursor;load.textContent=cursor?"Find more colleagues":"Refresh colleagues";hint.textContent=target.options.length>1?"Choose an eligible colleague. Availability is not confirmed.":"No eligible colleagues returned. Escalate to a manager instead.";
+          },"Loading eligible colleagues…");});
           const advanced=node("details"),advancedTitle=node("summary","Use a known staff reference"),manual=node("input"),manualLabel=node("label","Membership reference");manual.id="target-ref-"+c.id;manual.maxLength=36;manual.autocomplete="off";manualLabel.htmlFor=manual.id;advanced.append(advancedTitle,manualLabel,manual);box.append(advanced);target.addEventListener("change",()=>{manual.value="";});manual.addEventListener("input",()=>{target.value="";});target.manual=manual;
         }
         const actions=node("div",undefined,"actions");
@@ -106,6 +106,18 @@
       detail.append(card);
     }
   }
+
+  function handoverControls(locked=ctx.busy||authBusy){el("handover-fields").disabled=locked||!!pendingHandover;el("handover-submit").textContent=pendingHandover?"Retry unchanged handover":"Send handover";el("handover-discard").hidden=!pendingHandover;el("handover-more").hidden=!handoverCursor;el("handover-recipients-more").hidden=!peopleCursor;}
+  function clearHandovers(){handoverRows=[];handoverPeople=[];handoverCursor=null;peopleCursor=null;pendingHandover=null;el("handover-form").reset();el("handover-pending").checked=true;el("handover-list").replaceChildren();el("handover-recipient").replaceChildren(new Option("Find colleagues first",""));el("handover-case").replaceChildren(new Option("General shift note",""));say("handover-result","");handoverControls();}
+  function renderHandoverCases(){const select=el("handover-case"),previous=select.value;select.replaceChildren(new Option("General shift note",""));for(const c of cases?.cases||[]){if(c.status!=="resolved")select.append(new Option(describe(c.kind)+" · "+describe(c.status)+" · "+c.id.slice(0,8),c.id));}if([...select.options].some(o=>o.value===previous))select.value=previous;}
+  function renderHandoverPeople(){const select=el("handover-recipient"),previous=select.value;select.replaceChildren(new Option("Choose colleague",""));for(const p of handoverPeople)select.append(new Option((p.display_name||"Staff "+p.membership_id.slice(0,8))+" · "+describe(p.role),p.membership_id));if([...select.options].some(o=>o.value===previous))select.value=previous;}
+  async function loadHandoverPeople(more=false){if(ctx.busy||pendingHandover)return;const cursor=more?peopleCursor:null;if(more&&!cursor)return;await run(slug=>api.handoverRecipients(slug,cursor),data=>{const map=new Map((more?handoverPeople:[]).map(p=>[p.membership_id,p]));for(const p of data.recipients)map.set(p.membership_id,p);handoverPeople=[...map.values()];peopleCursor=data.next_cursor;renderHandoverPeople();renderHandovers();say("handover-result",handoverPeople.length?"Eligible colleagues loaded. Availability is not confirmed.":"No eligible colleagues returned.");},"Finding colleagues…");}
+  function handoverName(id){return handoverPeople.find(p=>p.membership_id===id)?.display_name||roster?.members?.find(p=>p.membership_id===id)?.display_name||"Staff "+id.slice(0,8);}
+  function renderHandovers(){const root=el("handover-list");root.replaceChildren();if(!handoverRows.length)root.append(node("p","No handovers in the returned records."));for(const h of handoverRows){const card=node("article",undefined,"staff-record");card.append(node("h3",describe(h.state)),node("p",handoverName(h.sender_id)+" → "+handoverName(h.recipient_id),"staff-meta"),node("p",dateLabel(h.created_at),"staff-meta"),node("p",h.note));if(h.case_id)card.append(node("p","Linked request "+h.case_id.slice(0,8),"staff-meta"));if(h.decided_at)card.append(node("p","Recorded decision "+dateLabel(h.decided_at),"staff-meta"));if(h.state==="pending"){for(const action of ["acknowledge","cancel"]){const b=node("button",action==="acknowledge"?"Acknowledge handover":"Cancel handover","button secondary");b.type="button";b.addEventListener("click",async()=>{if(ctx.busy||!confirm(action==="acknowledge"?"Acknowledge receipt of this note? This does not transfer case ownership.":"Cancel this handover?"))return;const ok=await run(slug=>api.decideHandover(slug,h.id,action),d=>say("handover-result","Handover "+d.state+" by server."));if(ok)await loadHandovers();});card.append(b);}}root.append(card);}}
+  async function loadHandovers(more=false){if(ctx.busy)return;const cursor=more?handoverCursor:null;if(more&&!cursor)return;const only=el("handover-pending").checked;await run(slug=>api.handovers(slug,cursor,only),data=>{const map=new Map((more?handoverRows:[]).map(h=>[h.id,h]));for(const h of data.handovers)map.set(h.id,h);handoverRows=[...map.values()];handoverCursor=data.next_cursor;renderHandovers();},"Refreshing handovers…");}
+  el("handover-load").addEventListener("click",()=>loadHandovers());el("handover-more").addEventListener("click",()=>loadHandovers(true));el("handover-pending").addEventListener("change",()=>loadHandovers());el("handover-recipients").addEventListener("click",()=>loadHandoverPeople());el("handover-recipients-more").addEventListener("click",()=>loadHandoverPeople(true));
+  el("handover-form").addEventListener("submit",async e=>{e.preventDefault();if(ctx.busy||!ctx.slug)return;if(!pendingHandover){const recipient_id=el("handover-recipient").value,case_id=el("handover-case").value||null,note=el("handover-note").value.trim();if(!WF_UUID.test(recipient_id)||note.length<4)return;if(!confirm("Send this handover note to the selected colleague?"))return;pendingHandover={recipient_id,case_id,note,request_key:crypto.randomUUID()};}const stamp=ctx.stamp();const ok=await run(slug=>api.createHandover(slug,pendingHandover),d=>{pendingHandover=null;el("handover-note").value="";el("handover-case").value="";say("handover-result","Handover "+d.state+" recorded. No external delivery or case transfer is implied.");},"Sending handover…");handoverControls();if(ok&&ctx.isCurrent(stamp))await loadHandovers();});
+  el("handover-discard").addEventListener("click",()=>{if(!ctx.busy&&pendingHandover&&confirm("Discard local retry? This does not cancel a server record.")){pendingHandover=null;handoverControls();}});
   function renderTickets(){
     const root=el("v1-tickets");root.replaceChildren();if(!tickets){say("ticket-summary","No verified tickets loaded.");return;}
     const q=el("ticket-search").value.trim().toLowerCase();
@@ -153,7 +165,7 @@
     if(!ctx.slug){say("staff-message","Select a hotel code first.");return false;}
     const stamp=ctx.stamp();say("staff-message",loading);
     try{const task=ctx.run(op);controls();const data=await task;if(!ctx.isCurrent(stamp)||!session.signedIn)return false;apply(data);if(el("staff-message").textContent===loading)say("staff-message","");return true;}
-    catch(e){if(!ctx.isCurrent(stamp))return false;if(e.status===401){localExit("Session expired or rejected. Sign in again.");return false;}if(e.status===403){commerce.clear();management.clear();native.clear();evidence.clear();documents.clear();aiStudio.clear();roster=null;rooms=null;renderSchedule();renderRooms();cases=null;tickets=null;settings=null;renderCases();renderTickets();el("settings-form").hidden=true;say("case-summary","Access must be verified again.");say("membership-result","");}say("staff-message",e.message);return false;}
+    catch(e){if(!ctx.isCurrent(stamp))return false;if(e.status===401){localExit("Session expired or rejected. Sign in again.");return false;}if(e.status===403){clearHandovers();commerce.clear();management.clear();native.clear();evidence.clear();documents.clear();aiStudio.clear();roster=null;rooms=null;renderSchedule();renderRooms();cases=null;tickets=null;settings=null;renderCases();renderTickets();el("settings-form").hidden=true;say("case-summary","Access must be verified again.");say("membership-result","");}say("staff-message",e.message);return false;}
     finally{controls();}
   }
   async function loadCases(){
@@ -216,7 +228,7 @@
   function selectProperty(slug){
     if(ctx.busy||authBusy||!session?.signedIn)return false;
     if(!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)||slug.length>100)return false;
-    if((pendingTicket||commerce.pending||management.pending||native.pending||evidence.pending||documents.pending||aiStudio.pending)&&!confirm("An unconfirmed operation may already exist. Switching property discards its local retry key. Continue?"))return false;
+    if((pendingHandover||pendingTicket||commerce.pending||management.pending||native.pending||evidence.pending||documents.pending||aiStudio.pending)&&!confirm("An unconfirmed operation may already exist. Switching property discards its local retry key. Continue?"))return false;
     ctx.select(slug);clearData();el("staff-slug").value=slug;
     const p=propertyRows.find(x=>x.slug===slug);
     say("property-label",p?p.display_name+" · "+describe(p.role)+" · "+p.time_zone:"Selected: "+slug+" · Access checked by each server request.");say("staff-message","");controls();return true;
@@ -258,7 +270,7 @@
   async function membership(action){
     if(ctx.busy)return;const subject=el("member-subject").value.trim(),role=el("member-role").value;
     if(action==="revoke"&&!confirm("Revoke this identity's membership of "+ctx.slug+"?"))return;
-    await run(slug=>api.membership(slug,action,subject,role),d=>{say("membership-result","Membership "+d.membership_id+" · "+d.role+" · "+d.state);say("staff-message","Membership command confirmed. No account or email delivery is implied.");if(action==="revoke"){commerce.clear();management.clear();native.clear();evidence.clear();documents.clear();aiStudio.clear();roster=null;rooms=null;renderSchedule();renderRooms();cases=null;tickets=null;settings=null;renderCases();renderTickets();el("settings-form").hidden=true;}});
+    await run(slug=>api.membership(slug,action,subject,role),d=>{say("membership-result","Membership "+d.membership_id+" · "+d.role+" · "+d.state);say("staff-message","Membership command confirmed. No account or email delivery is implied.");if(action==="revoke"){clearHandovers();commerce.clear();management.clear();native.clear();evidence.clear();documents.clear();aiStudio.clear();roster=null;rooms=null;renderSchedule();renderRooms();cases=null;tickets=null;settings=null;renderCases();renderTickets();el("settings-form").hidden=true;}});
   }
   el("membership-form").addEventListener("submit",e=>{e.preventDefault();membership("invite");});el("accept-membership").addEventListener("click",()=>membership("accept"));el("revoke-membership").addEventListener("click",()=>membership("revoke"));
   el("login-form").addEventListener("submit",async e=>{
@@ -266,7 +278,7 @@
     try{await session.signIn(el("email").value.trim(),password);el("login-panel").hidden=true;el("staff-workspace").hidden=false;el("signout").hidden=false;showView("cases");expiryTimer=setTimeout(()=>localExit("Session expired. Sign in again."),Math.max(0,session.expiresAt-Date.now()));el("staff-slug").focus();}
     catch(e){say("login-status",e.message);}finally{authBusy=false;controls();}
   });
-  el("signout").addEventListener("click",async()=>{if(authBusy)return;if((pendingTicket||commerce.pending||management.pending||native.pending||evidence.pending||documents.pending||aiStudio.pending)&&!confirm("A ticket, dining order, stock operation, room hold, provider command or document upload is unconfirmed. Signing out discards its local retry key, not the server record. Continue?"))return;authBusy=true;const task=session.signOut();localExit("Signed out of this workspace.");const revoked=await task;authBusy=false;controls();if(!revoked)say("login-status","Signed out locally. Provider session revocation could not be confirmed.");});
+  el("signout").addEventListener("click",async()=>{if(authBusy)return;if((pendingHandover||pendingTicket||commerce.pending||management.pending||native.pending||evidence.pending||documents.pending||aiStudio.pending)&&!confirm("A ticket, dining order, stock operation, room hold, provider command or document upload is unconfirmed. Signing out discards its local retry key, not the server record. Continue?"))return;authBusy=true;const task=session.signOut();localExit("Signed out of this workspace.");const revoked=await task;authBusy=false;controls();if(!revoked)say("login-status","Signed out locally. Provider session revocation could not be confirmed.");});
   window.addEventListener("pagehide",()=>{clearProperties();clearTimeout(expiryTimer);session?.clear();ctx.select("");clearData();});
   window.addEventListener("pageshow",e=>{if(e.persisted)localExit("Sign in again to access staff records.");});
   (async()=>{try{const r=await fetch(new URL("./staff-auth-config.json",location.href),{cache:"no-store",credentials:"same-origin",redirect:"error"});if(!r.ok)throw staffError("Staff identity configuration unavailable.");session=staffSession(window.fetch.bind(window),await r.json());api=staffApi(window.fetch.bind(window),session);say("login-status","Sign in with your confirmed hotel identity.");}catch{say("login-status","Staff sign-in is unavailable until an authorized identity provider is configured.");}finally{controls();}})();
