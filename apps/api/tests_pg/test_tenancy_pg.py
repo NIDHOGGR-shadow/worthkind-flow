@@ -24,7 +24,7 @@ import pytest
 
 MIGRATIONS = [
     Path(__file__).resolve().parents[3] / "db" / "migrations" / name
-    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql", "008_hotel_onboarding_settings.sql", "009_identity_provisioning.sql", "010_guest_quota.sql", "011_private_documents.sql", "012_operational_tickets.sql", "013_content_catalog.sql", "014_rooms_rates.sql", "015_rate_lookup_qualification.sql", "016_inventory_procurement.sql", "017_dining_kitchen.sql", "018_menu_lock_qualification.sql", "019_department_roles.sql", "020_staff_shifts.sql", "021_guest_preferences_feedback.sql", "022_reservation_intents.sql", "023_hotel_finance.sql", "024_events_recruitment.sql", "025_pms_accounts.sql", "026_reception_controls.sql", "027_payment_mode_boundaries.sql", "028_operations_read_contracts.sql", "029_native_booking_inventory.sql", "030_native_booking_changes.sql", "031_pos_receipt_evidence.sql", "032_purchase_batches.sql", "033_partial_refunds.sql", "034_native_stay_invoices.sql", "035_settlement_reconciliation.sql", "036_pms_reservation_evidence.sql", "037_native_stay_operations.sql", "038_pms_commands.sql", "039_provider_sync_guards.sql", "040_pos_refresh_worker.sql", "041_pos_cancellation_guard.sql", "042_pms_readback_recovery.sql", "043_provider_emergency_disable.sql", "044_ai_policy_and_retrieval.sql", "045_ai_automation_and_approvals.sql", "046_ai_retrieval_and_budget_guards.sql", "047_guest_resolution_decisions.sql", "048_staff_property_discovery.sql", "049_reception_handovers.sql")
+    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql", "008_hotel_onboarding_settings.sql", "009_identity_provisioning.sql", "010_guest_quota.sql", "011_private_documents.sql", "012_operational_tickets.sql", "013_content_catalog.sql", "014_rooms_rates.sql", "015_rate_lookup_qualification.sql", "016_inventory_procurement.sql", "017_dining_kitchen.sql", "018_menu_lock_qualification.sql", "019_department_roles.sql", "020_staff_shifts.sql", "021_guest_preferences_feedback.sql", "022_reservation_intents.sql", "023_hotel_finance.sql", "024_events_recruitment.sql", "025_pms_accounts.sql", "026_reception_controls.sql", "027_payment_mode_boundaries.sql", "028_operations_read_contracts.sql", "029_native_booking_inventory.sql", "030_native_booking_changes.sql", "031_pos_receipt_evidence.sql", "032_purchase_batches.sql", "033_partial_refunds.sql", "034_native_stay_invoices.sql", "035_settlement_reconciliation.sql", "036_pms_reservation_evidence.sql", "037_native_stay_operations.sql", "038_pms_commands.sql", "039_provider_sync_guards.sql", "040_pos_refresh_worker.sql", "041_pos_cancellation_guard.sql", "042_pms_readback_recovery.sql", "043_provider_emergency_disable.sql", "044_ai_policy_and_retrieval.sql", "045_ai_automation_and_approvals.sql", "046_ai_retrieval_and_budget_guards.sql", "047_guest_resolution_decisions.sql", "048_staff_property_discovery.sql", "049_reception_handovers.sql", "050_management_reports.sql")
 ]
 
 
@@ -1525,3 +1525,46 @@ def test_reception_handover_acknowledgement_and_tenant_boundary(pg, oidc_rig, mo
     with pytest.raises(errors.InsufficientPrivilege):
         with command_session(pg,"wf_guest_api"):
             pg.execute("SELECT * FROM worthkind_flow.reception_handovers")
+
+
+def test_management_reports_are_scoped_and_payment_evidence_separates_modes(pg, oidc_rig, monkeypatch):
+    client,key,source=oidc_rig
+    monkeypatch.setenv("WF_OPERATIONS_POSTGRES_DSN",os.environ["WF_STAFF_POSTGRES_DSN"])
+    def headers(subject): return auth_header(signed_token(key,subject))
+    owner=headers("idp:hotel-a-owner")
+    reception=headers("idp:hotel-a-reception")
+    outsider=headers("idp:hotel-b-reception")
+    base="/api/v1/properties/hotel-a/staff/reports"
+    def read(path,auth=owner):
+        response=client.get(base+path,headers=auth)
+        assert response.status_code==200,response.text
+        return response.json()
+    assert client.get(base+"/operations",headers=reception).status_code==403
+    assert client.get(base+"/payment-evidence",headers=outsider).status_code==403
+    assert read("/operations")["cases"]["queued"]==1
+    assert read("/operations")["rooms"]["registered"]==0
+    assert read("/payment-evidence")["groups"]==[]
+    for prop,member,mode,currency,amount,refund,state in [
+        (source["property_a"],source["members"]["owner"],"live","NGN",10000,3000,"verified"),
+        (source["property_a"],source["members"]["owner"],"test","NGN",70000,0,"verified"),
+        (source["property_a"],source["members"]["owner"],"live","USD",100,100,"refunded"),
+        (source["property_a"],source["members"]["owner"],"live","NGN",90000,0,"pending"),
+        (source["property_b"],source["members"]["outsider"],"live","NGN",80000,0,"verified")]:
+        order,invoice,payment=uuid4(),uuid4(),uuid4()
+        pg.execute("INSERT INTO worthkind_flow.dining_orders(id,property_id,request_key,request_payload,created_by,state,currency,total_minor) VALUES(%s,%s,%s,'{}',%s,'served',%s,%s)",(order,prop,str(order),member,currency,amount))
+        pg.execute("INSERT INTO worthkind_flow.hotel_invoices(id,property_id,dining_order_id,amount_minor,currency,issued_by) VALUES(%s,%s,%s,%s,%s,%s)",(invoice,prop,order,amount,currency,member))
+        pg.execute("INSERT INTO worthkind_flow.hotel_payment_intents(id,property_id,invoice_id,reference,account_alias,mode,amount_minor,currency,state,provider_transaction_id,verified_at) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,CASE WHEN %s='pending' THEN NULL ELSE now() END)",(payment,prop,invoice,str(payment),str(payment),mode,amount,currency,state,None if state=="pending" else 123,state))
+        if refund:
+            pg.execute("INSERT INTO worthkind_flow.hotel_refunds(property_id,payment_id,amount_minor,reason,state,requested_by,provider_refund_id,request_key) VALUES(%s,%s,%s,'Test refund evidence','processed',%s,%s,%s)",(prop,payment,refund,member,refund,str(uuid4())))
+    result=read("/payment-evidence")
+    groups={(g["mode"],g["currency"]):g for g in result["groups"]}
+    assert len(groups)==3 and not result["settlement_verified"]
+    assert groups["live","NGN"]["verified_gross_minor"]=="10000"
+    assert groups["live","NGN"]["processed_refunds_minor"]=="3000"
+    assert groups["live","NGN"]["net_after_refunds_minor"]=="7000"
+    assert groups["live","USD"]["net_after_refunds_minor"]=="0"
+    assert groups["test","NGN"]["verified_gross_minor"]=="70000"
+    assert read("/operations")["dining"]["in_service"]==0
+    with pytest.raises(errors.InsufficientPrivilege):
+        with command_session(pg,"wf_guest_api"):
+            pg.execute("SELECT worthkind_flow.management_snapshot(%s,%s)",("idp:hotel-a-owner","hotel-a"))

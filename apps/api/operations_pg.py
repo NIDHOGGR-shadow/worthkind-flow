@@ -73,6 +73,14 @@ def decrypt(value,aad):
 
 
 def install_operations_pg_routes(app):
+    @app.get("/api/v1/properties/{slug}/staff/reports/operations")
+    def management_report(slug:str,authorization:str|None=Header(None)):
+        return command("SELECT worthkind_flow.management_snapshot(%s,%s)",(actor(authorization),slug))[0]
+
+    @app.get("/api/v1/properties/{slug}/staff/reports/payment-evidence")
+    def payment_report(slug:str,authorization:str|None=Header(None)):
+        return command("SELECT worthkind_flow.payment_evidence_summary(%s,%s)",(actor(authorization),slug))[0]
+
     @app.get("/api/v1/staff/properties")
     def staff_properties(after: str | None = Query(None,pattern=r"^[a-z0-9][a-z0-9-]{1,79}$"),
                          limit: int = Query(50,ge=1,le=100),authorization: str | None = Header(None)):
