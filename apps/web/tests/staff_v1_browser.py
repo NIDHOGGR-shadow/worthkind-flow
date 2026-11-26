@@ -193,7 +193,7 @@ def check_staff_v1(browser, base):
             state["payment"]="verified"
             route.fulfill(json={"id":TICKET_ID,"state":"verified","mode":"test","payment_confirmed":False})
         elif path == prefix + "/cases":
-            route.fulfill(json={"property": "hotel-a", "staff_role": "reception",
+            route.fulfill(json={"property": "hotel-a", "staff_role": "manager",
                                "cases": [{"id": CASE_ID, "status": state["case"], "kind": "human",
                                           "customer_name": "Synthetic guest", "contact": "guest@example.invalid",
                                           "details": "<img src=x>"}]})
@@ -205,9 +205,12 @@ def check_staff_v1(browser, base):
             state["case"] = "responded"
             route.fulfill(json={"property": "hotel-a", "case_id": CASE_ID, "status": "responded"})
         elif path == prefix + "/cases/" + CASE_ID + "/control":
-            assert request.post_data_json["action"] == "escalate"
-            state["case"] = "escalated"
-            route.fulfill(json={"case_id": CASE_ID, "state": "escalated"})
+            action = request.post_data_json["action"]
+            assert action in ("escalate","transfer")
+            if action == "transfer":
+                assert request.post_data_json["target_membership_id"] == MEMBER_ID
+            state["case"] = "claimed" if action == "transfer" else "escalated"
+            route.fulfill(json={"case_id": CASE_ID, "state": state["case"]})
         elif path == prefix + "/schedule":
             route.fulfill(json={"members": [{"membership_id": MEMBER_ID, "role": "reception",
                                            "state": "active", "display_name": "Synthetic staff"}],
@@ -286,6 +289,18 @@ def check_staff_v1(browser, base):
     page.locator("#reason-" + CASE_ID).fill("Manager review requested")
     page.get_by_role("button", name="Escalate", exact=True).click()
     expect(page.locator("#v1-cases")).to_contain_text("escalated")
+    page.get_by_text("Case controls", exact=True).click()
+    page.get_by_role("button",name="Find colleagues",exact=True).click()
+    expect(page.locator("#target-"+CASE_ID)).to_contain_text("Synthetic staff")
+    page.locator("#target-"+CASE_ID).select_option(MEMBER_ID)
+    page.locator("#reason-"+CASE_ID).fill("Transfer to named colleague")
+    page.get_by_role("button",name="Transfer",exact=True).click()
+    expect(page.locator("#v1-cases")).to_contain_text("claimed")
+    page.get_by_role("button",name="Create linked department task",exact=True).click()
+    expect(page.locator("#tickets-view")).to_be_visible()
+    expect(page.locator("#ticket-origin")).to_have_value(CASE_ID)
+    expect(page.locator("#ticket-description")).to_have_value("<img src=x>")
+    page.locator("#create-ticket").evaluate("(form) => form.reset()")
     select_module("Department work")
     page.locator("#load-tickets").click()
     expect(page.locator("#v1-tickets")).to_contain_text("Overdue")
