@@ -180,3 +180,12 @@ Next: investigate Actions issue #68 and obtain executed passing CI for browser P
 
 ## 2026-11-26 — Transactional email delivery
 - Migration 056 adds reception-authorized service update email jobs, explicit operator-verified contact reference and guest service-followup consent, per-property approved sender/account, bounded provider retries, lease exclusion and Resend provider readback. No automatic marketing or unauthenticated sends; receipt data and guest content are not included in mail. Accepted is not delivered. Consent rechecked before provider call; an in-flight external call cannot be unsent. Polling avoids webhook setup but requires a read-capable scoped Resend account credential. Worker profile defaults disabled; no provider account, sender, hosted worker or delivery verified. Tests use disposable DB and isolated provider fixtures, not real sends. CI pending. Added CRM DSN to Compose.
+
+### Verification addendum — migrations 052–056
+- 052 attendance: 632c64c7b52be264a7bcd028849d0ebd4b47bc5a, CI runs 45865240568 and 45865240601 passed.
+- 053 guest dining: e000d795d4c7b6d694af0561933c214e1154c8bf, CI runs 45865338971 and 45865338820 passed.
+- 054 leave: 6576e0bde1915560220882846a2aa22df6fd7bef, CI runs 45865696936 and 45865696908 passed.
+- 055 platform CRM: afc4f01df8d32d83fd9352a83fd74428c732e1ac, CI runs 45865924773 and 45865924757 passed.
+- 056 email: ff6467b6d7bdd4d7049a93f584a510bec9783973, all four jobs in 45866261611 and separate restore run 45866261612 passed.
+- Exact committed migrations 052 through 056 applied to existing staging xfxqlcmsfkbvbybkrppq. Postflight: 88/88 ordinary Flow tables forced RLS, zero direct anon/authenticated table grants, zero enabled email accounts and zero active CRM operators. Verified restricted execution boundaries. Advisor INFO on intentionally default-deny private tables, no Flow findings in anon SECURITY DEFINER executable warning. No provider sends, model activation, actual staff attendance, prospects or customer data created.
+- Integration candidate PR #4 (a801cc9ce80a0e7e494df34c19b00d99d2f5c9bb) combines pinned backend and frontend heads plus route allowlist and actual loopback gateway/PostgreSQL HTTP test. CI pending. Main remains unchanged; hosted API origin not verified, no hosted acceptance claimed.
