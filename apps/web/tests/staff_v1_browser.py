@@ -74,6 +74,9 @@ def check_staff_v1(browser, base):
             route.fulfill(json={"items":[{"id":TICKET_ID,"name":"Synthetic meal","price_minor":250000,"currency":"NGN"}]})
             return
         assert request.headers.get("authorization") == "Bearer fixture.token.value"
+        if path == "/api/v1/staff/properties":
+            route.fulfill(json={"properties":[{"id":MEMBER_ID,"slug":"hotel-a","display_name":"Synthetic Hotel A","role":"manager","time_zone":"Africa/Lagos","membership_state":"active"}],"next_cursor":None})
+            return
         if "/hotel-b/" in path:
             route.fulfill(status=403, json={"detail": "Access denied"})
             return
@@ -262,6 +265,7 @@ def check_staff_v1(browser, base):
             route.fulfill(status=404, json={"detail": "Not found"})
 
     page.route("**/api/v1/properties/**", api)
+    page.route("**/api/v1/staff/properties?**", api)
     page.goto(base + "/static/staff-v1.html")
     expect(page.locator("#login")).to_be_enabled()
     page.locator("#email").fill("staff@example.invalid")
@@ -269,8 +273,11 @@ def check_staff_v1(browser, base):
     page.locator("#login").click()
     expect(page.locator("#staff-workspace")).to_be_visible()
     expect(page.locator("#password")).to_have_value("")
-    page.locator("#staff-slug").fill("hotel-a")
-    page.get_by_role("button", name="Select property").click()
+    page.get_by_role("button",name="Find my hotels").click()
+    expect(page.locator("#property-discovery-list")).to_contain_text("Synthetic Hotel A")
+    page.get_by_role("button",name="Open hotel",exact=True).click()
+    expect(page.locator("#property-label")).to_contain_text("Synthetic Hotel A")
+    select_module("Communication Hub")
     page.locator("#load-cases").click()
     expect(page.locator(".communication-detail h3")).to_have_text("Synthetic guest")
     expect(page.locator(".communication-entry")).to_have_attribute("aria-pressed","true")
@@ -505,6 +512,7 @@ def check_staff_v1(browser, base):
     page.locator("#signout").click()
     expect(page.locator("#login-panel")).to_be_visible()
     expect(page.locator("#staff-workspace")).to_be_hidden()
+    expect(page.locator("#property-discovery-list")).to_be_empty()
     assert all(path.startswith("/api/v1/") for _, path in calls)
     page.close()
     print("PASS: staff v1 Chromium fixture journey and 114 authenticated-layout checks")
