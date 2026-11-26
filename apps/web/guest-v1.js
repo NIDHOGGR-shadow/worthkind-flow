@@ -33,6 +33,13 @@
   window.addEventListener("hashchange",()=>showView(location.hash.slice(1),true,"replace"));
   document.addEventListener("flow:guest-view",e=>showView(e.detail,true));
   document.addEventListener("flow:human-handoff",e=>{if(journey.busy||journey.pending){showView(journey.active?"v1-track":"request",true);say(journey.active?"receipt-copy-status":"v1-submit-status",journey.busy?"Your request is being checked. Wait for the result before starting another.":"An earlier request is unconfirmed. Retry it unchanged or explicitly discard it before sending another.");return;}const {slug,question}=e.detail||{};if(journey.active){showView("v1-track",true);say("receipt-copy-status",slug&&slug!==journey.active.slug?"Your saved request belongs to another hotel. Save its receipt and start a new request for the intended hotel.":"You have an existing request. Save its receipt and start a new request if you need further help.");return;}showView("request",true);const hotel=el("v1-hotel"),details=el("v1-details");if(hotel.value.trim()&&slug&&hotel.value.trim()!==slug){say("v1-submit-status","Review your existing draft and hotel before sending. Nothing was sent.");return;}if(typeof slug==="string"&&/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)&&slug.length<=100)hotel.value=slug;el("v1-kind").value="human";if(!details.value.trim()&&typeof question==="string"&&question.length<=800)details.value=question;say("v1-submit-status","Review your request and contact details, then send it to reception. Nothing has been sent yet.");el("v1-name").focus();});
+  let resolution=null,resolutionBusy=false,resolutionEpoch=0;
+  function clearResolution(){++resolutionEpoch;resolution=null;el("guest-resolution").hidden=true;el("resolution-confirm").hidden=true;el("resolution-reopen").hidden=true;say("guest-resolution-status","");}
+  function resolutionControls(){for(const id of ["resolution-load","resolution-confirm","resolution-reopen"])el(id).disabled=resolutionBusy||journey.busy;}
+  function showResolution(d){resolution=d;el("guest-resolution").hidden=false;el("resolution-confirm").hidden=!d.awaiting_guest_confirmation;el("resolution-reopen").hidden=!d.awaiting_guest_confirmation;say("guest-resolution-status",d.guest_confirmed?"You confirmed this issue was resolved.":d.awaiting_guest_confirmation?"Hotel staff marked this issue resolved. Tell us whether you still need help.":d.guest_decision==="reopen"?"You reopened this request. Staff will need to accept it again.":"There is no current resolution awaiting your decision.");if(d.guest_confirmed)say("v1-case-status","Resolved and confirmed by you.");}
+  async function loadResolution(){if(resolutionBusy||journey.busy||!journey.active)return;const active=journey.active,stamp=++resolutionEpoch;resolutionBusy=true;resolution=null;el("resolution-confirm").hidden=true;el("resolution-reopen").hidden=true;say("guest-resolution-status","Checking your resolution…");controls();try{const d=await api.resolution(active);if(stamp===resolutionEpoch)showResolution(d);}catch(e){if(stamp===resolutionEpoch)say("guest-resolution-status",e.message);}finally{resolutionBusy=false;controls();}}
+  async function decideResolution(decision){if(resolutionBusy||journey.busy||!resolution?.awaiting_guest_confirmation||!journey.active)return;if(!confirm(decision==="confirm"?"Confirm that your issue is resolved?":"Reopen this request for reception to review again?"))return;const active=journey.active,id=resolution.resolution_id,stamp=++resolutionEpoch;resolutionBusy=true;resolution=null;el("resolution-confirm").hidden=true;el("resolution-reopen").hidden=true;say("guest-resolution-status","Recording your decision…");controls();try{await api.decideResolution(active,id,decision);if(stamp!==resolutionEpoch)return;const latest=await journey.refresh();if(stamp!==resolutionEpoch)return;render(latest,false);const d=await api.resolution(active);if(stamp===resolutionEpoch)showResolution(d);}catch(e){if(stamp===resolutionEpoch)say("guest-resolution-status",e.message+" Check resolution before submitting again.");}finally{resolutionBusy=false;controls();}}
+  el("resolution-load").addEventListener("click",loadResolution);el("resolution-confirm").addEventListener("click",()=>decideResolution("confirm"));el("resolution-reopen").addEventListener("click",()=>decideResolution("reopen"));
   const statusText={queued:"Recorded — waiting for staff acceptance",claimed:"Accepted by staff",responded:"Staff response recorded",escalated:"Escalated for staff review",resolved:"Marked resolved by staff — guest confirmation not recorded"};
   function controls(){
     el("request-fields").disabled=journey.busy||journey.pending||!!journey.active;
@@ -42,14 +49,17 @@
     el("v1-discard").hidden=!journey.pending;
     el("v1-discard").disabled=journey.busy;
     el("v1-recover").disabled=journey.busy||journey.pending||!!journey.active;
-    el("v1-refresh").disabled=journey.busy||commerce.busy||management.busy||native.busy||!journey.active;
-    el("v1-new").disabled=journey.busy||commerce.busy||management.busy||native.busy;
+    resolutionControls();
+    el("v1-refresh").disabled=resolutionBusy||journey.busy||commerce.busy||management.busy||native.busy||!journey.active;
+    el("v1-new").disabled=resolutionBusy||journey.busy||commerce.busy||management.busy||native.busy;
     document.querySelectorAll("[data-service]").forEach(b=>{b.disabled=journey.busy||journey.pending;const active=!!journey.active;if(b.dataset.service==="human")b.textContent=active?"View my request":"Contact reception";else{const text=b.querySelector("span:not(.service-arrow)");if(text){if(!text.dataset.original)text.dataset.original=text.textContent;text.textContent=active?(["booking","events"].includes(b.dataset.service)?"Manage your stay and venue requests":"View your current request or start a new one"):text.dataset.original;}}});
   }
   function render(result,focus){
     const active=journey.active;
     commerce.activate();management.activate();native.activate();
     el("v1-track").hidden=false;
+    if(focus)clearResolution();
+    if(result.status==="resolved"||resolution){el("guest-resolution").hidden=false;if(!resolutionBusy){resolution=null;el("resolution-confirm").hidden=true;el("resolution-reopen").hidden=true;say("guest-resolution-status","Check the latest resolution before responding.");}}
     say("v1-case-status",statusText[result.status]+". This enquiry status does not establish booking, payment or notification status.");
     say("v1-reply",typeof result.staff_reply==="string"?result.staff_reply:"No staff response returned yet.");
     say("v1-receipt","Hotel: "+active.slug+"\nCase ID: "+active.case_id+"\nPrivate receipt token: "+active.token);
@@ -74,7 +84,7 @@
     finally{controls();}
   });
   el("v1-refresh").addEventListener("click",async()=>{
-    if(journey.busy||commerce.busy||management.busy||native.busy||!journey.active)return;
+    if(resolutionBusy||journey.busy||commerce.busy||management.busy||native.busy||!journey.active)return;
     say("v1-case-status","Checking latest status…");
     try{const task=journey.refresh();controls();render(await task,false);}
     catch(err){say("v1-case-status",err.message+" The previous state is not newly verified.");}
@@ -91,7 +101,7 @@
     if(journey.busy||commerce.busy||management.busy||native.busy||!journey.active)return;
     if((commerce.pending||management.pending)&&!window.confirm("An unconfirmed stay, venue, feedback or application request may exist. Starting over discards its local retry proof. Continue?"))return;
     if(!window.confirm("Have you saved the private receipt? Starting over removes it from this page."))return;
-    journey.reset();commerce.reset();management.reset();native.reset();el("v1-form").reset();el("v1-recover-form").reset();el("v1-track").hidden=true;el("v1-receipt").hidden=true;el("v1-copy").hidden=true;say("receipt-copy-status","");el("v1-reveal").setAttribute("aria-expanded","false");say("v1-reveal","Show private receipt");say("v1-receipt","");say("v1-reply","");say("v1-case-status","");say("v1-recover-status","");say("v1-submit-status","Ready for a new request.");controls();showView("request",true);el("v1-hotel").focus();
+    clearResolution();journey.reset();commerce.reset();management.reset();native.reset();el("v1-form").reset();el("v1-recover-form").reset();el("v1-track").hidden=true;el("v1-receipt").hidden=true;el("v1-copy").hidden=true;say("receipt-copy-status","");el("v1-reveal").setAttribute("aria-expanded","false");say("v1-reveal","Show private receipt");say("v1-receipt","");say("v1-reply","");say("v1-case-status","");say("v1-recover-status","");say("v1-submit-status","Ready for a new request.");controls();showView("request",true);el("v1-hotel").focus();
   });
   controls();showView(location.hash.slice(1),false,location.hash?"replace":"none");
 })();
