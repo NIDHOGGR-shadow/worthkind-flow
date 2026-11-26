@@ -121,3 +121,22 @@ test("staff resolution read rejects contradictory guest confirmation",async()=>{
  assert.equal((await staffApi(async()=>ok(snapshot),identity).resolution("hotel-a",id)).guest_confirmed,true);
  await assert.rejects(staffApi(async()=>ok({...snapshot,awaiting_guest_confirmation:true}),identity).resolution("hotel-a",id));
 });
+
+test("handover recipient directory and list reject malformed cursor and state",async()=>{
+ const recipient={membership_id:id,role:"reception",display_name:"Reception colleague"};
+ const a=staffApi(async()=>ok({recipients:[recipient],next_cursor:null}),identity);
+ assert.deepEqual((await a.handoverRecipients("hotel-a")).recipients,[recipient]);
+ await assert.rejects(a.handoverRecipients("hotel-a","../bad"));
+ await assert.rejects(staffApi(async()=>ok({recipients:[{...recipient,role:"finance"}],next_cursor:null}),identity).handoverRecipients("hotel-a"));
+ await assert.rejects(staffApi(async()=>ok({handovers:[{id,sender_id:id,recipient_id:id,case_id:null,note:"A note",state:"pending",created_at:"2026-11-26T15:00:00Z",decided_at:null,decided_by:id}],next_cursor:null}),identity).handovers("hotel-a"));
+});
+test("handover creation and explicit decision preserve exact server result",async()=>{
+ const calls=[],body={recipient_id:id,case_id:null,request_key:"22345678-1234-1234-1234-123456789abc",note:"Follow up"};
+ const a=staffApi(async(u,o)=>{calls.push([u,o]);return ok({id,state:u.endsWith("/decision")?"acknowledged":"pending",duplicate:false});},identity);
+ await a.createHandover("hotel-a",body);await a.createHandover("hotel-a",body);
+ assert.equal(calls[0][1].body,calls[1][1].body);
+ assert.equal(JSON.parse(calls[0][1].body).request_key,body.request_key);
+ assert.equal((await a.decideHandover("hotel-a",id,"acknowledge")).state,"acknowledged");
+ assert.ok(calls.every(([u,o])=>u.startsWith("/api/v1/properties/hotel-a/staff/handovers")&&o.headers.Authorization==="Bearer verified.test.token"));
+ await assert.rejects(a.decideHandover("hotel-a",id,"transfer"));
+});
