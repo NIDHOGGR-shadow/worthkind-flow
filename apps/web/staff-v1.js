@@ -70,6 +70,7 @@
       const message=node("div",undefined,"communication-message");message.append(node("p","Guest request","communication-author"),node("p",c.details||"No request details returned."));card.append(message);
       if(typeof c.staff_reply==="string"&&c.staff_reply.trim()){const reply=node("div",undefined,"communication-message staff-reply");reply.append(node("p","Latest recorded staff response","communication-author"),node("p",c.staff_reply));card.append(reply);}
       const ref=node("details"),refTitle=node("summary","Request reference");ref.append(refTitle,node("p",c.id,"staff-meta"));card.append(ref);
+      const ticketButton=node("button","Create linked department task","button secondary");ticketButton.type="button";ticketButton.addEventListener("click",()=>{if(ctx.busy||pendingTicket)return;if(["ticket-subject","ticket-description","ticket-origin"].some(id=>el(id).value.trim())&&!confirm("Replace your unfinished department task draft?"))return;el("create-ticket").reset();el("ticket-origin").value=c.id;el("ticket-subject").value=("Guest request: "+(c.customer_name||describe(c.kind))).slice(0,160);el("ticket-description").value=(c.details||"Follow up on this guest request.").slice(0,3000);el("ticket-category").value="reception";showView("tickets");el("create-ticket").closest("details").open=true;el("ticket-subject").focus();say("staff-message","Review the department and task details before creating it.");});card.append(ticketButton);
       if(c.status==="queued"){const b=node("button","Claim case","button primary");b.type="button";b.addEventListener("click",()=>mutate(()=>api.caseAction(ctx.slug,c.id,"claim"),loadCases,"Case claimed by server."));card.append(b);}
       if(c.status==="claimed"){
         const form=node("form"),label=node("label","Record a response"),field=node("textarea");field.id="reply-"+c.id;label.htmlFor=field.id;field.required=true;field.minLength=2;field.maxLength=3000;field.rows=3;
@@ -83,12 +84,21 @@
         box.append(summary,label,reason);
         let target;
         if(allowed.includes("transfer")){
-          const tl=node("label","Transfer to membership ID");target=node("input");target.id="target-"+c.id;target.maxLength=36;tl.htmlFor=target.id;box.append(tl,target);
+          const tl=node("label","Transfer to");target=node("select");target.id="target-"+c.id;tl.htmlFor=target.id;target.append(new Option("Choose a colleague",""));box.append(tl,target);
+          const hint=node("p","Transfer is limited to active reception staff and managers. A listed colleague is not necessarily available.","staff-meta");
+          const load=node("button","Find colleagues","button secondary");load.type="button";box.append(load,hint);
+          load.addEventListener("click",async()=>{if(ctx.busy)return;target.replaceChildren(new Option("Choose a colleague",""));const now=Date.now();await run(slug=>api.schedule(slug,new Date(now-86400000).toISOString(),new Date(now+86400000).toISOString()),data=>{
+            const people=data.members.filter(m=>m.state==="active"&&["owner","manager","reception"].includes(m.role)&&typeof m.display_name==="string"&&m.display_name.trim());
+            for(const m of people){target.append(new Option(m.display_name+" · "+describe(m.role),m.membership_id));}
+            hint.textContent=people.length?"Select an authorized roster member. Duty or availability is not confirmed.":"No named colleagues returned for your access. Escalate to a manager instead.";
+            if(cases?.staff_role==="reception")hint.textContent="Your roster access may include only your own profile. Escalate if the intended colleague is not listed.";
+          },"Loading authorized roster…");});
+          const advanced=node("details"),advancedTitle=node("summary","Use a known staff reference"),manual=node("input"),manualLabel=node("label","Membership reference");manual.id="target-ref-"+c.id;manual.maxLength=36;manual.autocomplete="off";manualLabel.htmlFor=manual.id;advanced.append(advancedTitle,manualLabel,manual);box.append(advanced);target.addEventListener("change",()=>{manual.value="";});manual.addEventListener("input",()=>{target.value="";});target.manual=manual;
         }
         const actions=node("div",undefined,"actions");
         for(const action of allowed){
           const b=node("button",({transfer:"Transfer",escalate:"Escalate",resolve:"Mark resolved by staff"})[action],"button secondary");b.type="button";
-          b.addEventListener("click",()=>{const why=reason.value.trim(),to=target?.value.trim();if(why.length<8||(action==="transfer"&&!WF_UUID.test(to))){say("staff-message","Enter a valid reason and transfer membership ID when required.");return;}if(!confirm("Confirm "+action+" for this case? Staff resolution is not guest confirmation."))return;mutate(()=>api.caseControl(ctx.slug,c.id,action,why,to),loadCases,"Case control recorded. No guest confirmation or notification delivery is implied.");});actions.append(b);
+          b.addEventListener("click",()=>{const why=reason.value.trim(),to=(target?.value||target?.manual?.value||"").trim();if(why.length<8||(action==="transfer"&&!WF_UUID.test(to))){say("staff-message","Enter a reason and choose an authorized colleague or known staff reference.");return;}if(!confirm("Confirm "+action+" for this case? Staff resolution is not guest confirmation."))return;mutate(()=>api.caseControl(ctx.slug,c.id,action,why,to),loadCases,"Case control recorded. No guest confirmation or notification delivery is implied.");});actions.append(b);
         }box.append(actions);card.append(box);
       }
       detail.append(card);
