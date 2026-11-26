@@ -43,7 +43,7 @@
     el("v1-recover").disabled=journey.busy||journey.pending||!!journey.active;
     el("v1-refresh").disabled=journey.busy||commerce.busy||management.busy||native.busy||!journey.active;
     el("v1-new").disabled=journey.busy||commerce.busy||management.busy||native.busy;
-    document.querySelectorAll("[data-service]").forEach(b=>{b.disabled=journey.busy||journey.pending||!!journey.active;});
+    document.querySelectorAll("[data-service]").forEach(b=>{b.disabled=journey.busy||journey.pending;const active=!!journey.active;if(b.dataset.service==="human")b.textContent=active?"View my request":"Contact reception";else{const text=b.querySelector("span:not(.service-arrow)");if(text){if(!text.dataset.original)text.dataset.original=text.textContent;text.textContent=active?(["booking","events"].includes(b.dataset.service)?"Manage your stay and venue requests":"View your current request or start a new one"):text.dataset.original;}}});
   }
   function render(result,focus){
     const active=journey.active;
@@ -54,7 +54,7 @@
     say("v1-receipt","Hotel: "+active.slug+"\nCase ID: "+active.case_id+"\nPrivate receipt token: "+active.token);
     if(focus){el("v1-receipt").hidden=true;el("v1-copy").hidden=true;say("receipt-copy-status","");el("v1-reveal").setAttribute("aria-expanded","false");say("v1-reveal","Show private receipt");showView("v1-track",true);}
   }
-  document.querySelectorAll("[data-service]").forEach(b=>b.addEventListener("click",()=>{if(journey.busy||journey.pending||journey.active)return;el("v1-kind").value=b.dataset.service;showView("request",true);el("v1-hotel").focus();}));
+  document.querySelectorAll("[data-service]").forEach(b=>b.addEventListener("click",()=>{if(journey.busy||journey.pending)return;if(journey.active){showView(["booking","events"].includes(b.dataset.service)?"guest-commerce":"v1-track",true);return;}el("v1-kind").value=b.dataset.service;showView("request",true);el("v1-hotel").focus();}));
   el("v1-form").addEventListener("submit",async e=>{
     e.preventDefault();if(journey.busy||journey.active)return;
     const fields={kind:el("v1-kind").value,name:el("v1-name").value.trim(),contact:el("v1-contact").value.trim(),details:el("v1-details").value.trim()};
