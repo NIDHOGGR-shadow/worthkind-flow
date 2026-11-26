@@ -17,7 +17,7 @@
   function clearData(){
     commerce.clear();management.clear();native.clear();evidence.clear();documents.clear();aiStudio.clear();
     roster=null;rooms=null;range=null;el("staff-roster").replaceChildren();el("staff-shifts").replaceChildren();el("staff-rooms").replaceChildren();el("staff-profile-form").reset();el("shift-form").reset();el("schedule-range").reset();
-    cases=null;tickets=null;settings=null;
+    cases=null;tickets=null;settings=null;el("case-search").value="";el("ticket-search").value="";say("ticket-summary","");el("case-filter").value="";el("ticket-filter").value="";el("ticket-status-filter").value="";
     el("v1-cases").replaceChildren();el("v1-tickets").replaceChildren();
     el("settings-form").hidden=true;say("settings-version","");say("ai-state","");
     el("guest-enabled").checked=false;
@@ -47,11 +47,13 @@
     el("staff-module-select").value=value;
     document.querySelectorAll("[data-panel]").forEach(n=>{n.hidden=n.id!==value+"-view";});
     document.querySelectorAll("[data-view]").forEach(n=>n.setAttribute("aria-pressed",String(n.dataset.view===value)));
+    say("staff-current-module","Selected module: "+el("staff-module-select").selectedOptions[0].textContent);
   }
   el("staff-module-select").addEventListener("change",e=>{if(!ctx.busy&&Array.from(document.querySelectorAll("[data-view]")).some(n=>n.dataset.view===e.target.value))showView(e.target.value);});
   function renderCases(){
     const root=el("v1-cases");root.replaceChildren();if(!cases)return;
-    const filtered=cases.cases.filter(c=>!el("case-filter").value||c.status===el("case-filter").value);
+    const q=el("case-search").value.trim().toLowerCase();
+    const filtered=cases.cases.filter(c=>(!el("case-filter").value||c.status===el("case-filter").value)&&(!q||[c.customer_name,c.id,c.kind,c.details].some(v=>typeof v==="string"&&v.toLowerCase().includes(q))));
     say("case-summary",filtered.length+" of "+cases.cases.length+" returned cases · Role: "+cases.staff_role+" · Maximum 100 records");
     if(!filtered.length)root.append(node("p","No matching cases.","case-empty"));
     for(const c of filtered){
@@ -84,8 +86,10 @@
     }
   }
   function renderTickets(){
-    const root=el("v1-tickets");root.replaceChildren();if(!tickets)return;
-    const filtered=tickets.filter(t=>(!el("ticket-filter").value||t.category===el("ticket-filter").value)&&(!el("ticket-status-filter").value||t.status===el("ticket-status-filter").value));
+    const root=el("v1-tickets");root.replaceChildren();if(!tickets){say("ticket-summary","No verified tickets loaded.");return;}
+    const q=el("ticket-search").value.trim().toLowerCase();
+    const filtered=tickets.filter(t=>(!el("ticket-filter").value||t.category===el("ticket-filter").value)&&(!el("ticket-status-filter").value||t.status===el("ticket-status-filter").value)&&(!q||[t.subject,t.description,t.id,t.category].some(v=>typeof v==="string"&&v.toLowerCase().includes(q))));
+    say("ticket-summary",filtered.length+" of "+tickets.length+" returned tickets");
     if(!filtered.length)root.append(node("p","No matching department tickets.","case-empty"));
     for(const t of filtered){
       const card=node("article",undefined,"staff-record");
@@ -183,6 +187,8 @@
     if(ctx.isCurrent(stamp))say("staff-message",outcome+(refreshed?" Current records refreshed.":" Refresh unsuccessful; check before retrying."));
     return ok;
   }
+  el("case-search").addEventListener("input",renderCases);
+  el("ticket-search").addEventListener("input",renderTickets);
   document.querySelectorAll("[data-view]").forEach(b=>b.addEventListener("click",()=>{if(!ctx.busy)showView(b.dataset.view);}));
   el("property-form").addEventListener("submit",e=>{
     e.preventDefault();if(ctx.busy)return;
