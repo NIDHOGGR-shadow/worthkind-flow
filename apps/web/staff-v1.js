@@ -16,7 +16,7 @@
   const aiStudio=initAiStudio({session:()=>session,ctx,run});
   function clearData(){
     commerce.clear();management.clear();native.clear();evidence.clear();documents.clear();aiStudio.clear();
-    roster=null;rooms=null;range=null;el("staff-roster").replaceChildren();el("staff-shifts").replaceChildren();el("staff-rooms").replaceChildren();el("staff-profile-form").reset();el("shift-form").reset();el("schedule-range").reset();
+    roster=null;rooms=null;range=null;el("staff-roster").replaceChildren();el("staff-shifts").replaceChildren();el("staff-rooms").replaceChildren();el("staff-profile-form").reset();el("shift-form").reset();el("schedule-range").reset();renderStaffSelectors();
     cases=null;tickets=null;settings=null;selectedCase=null;el("case-search").value="";el("ticket-search").value="";say("ticket-summary","");el("case-filter").value="";el("ticket-filter").value="";el("ticket-status-filter").value="";
     el("v1-cases").replaceChildren();el("v1-tickets").replaceChildren();
     el("settings-form").hidden=true;say("settings-version","");say("ai-state","");
@@ -162,7 +162,8 @@
   }
   function iso(value){const d=new Date(value);if(!Number.isFinite(d.getTime()))throw staffError("Select a valid date and time.");return d.toISOString();}
   function dateLabel(value){const d=new Date(value);return Number.isFinite(d.getTime())?d.toLocaleString():String(value);}
-  function renderSchedule(){
+  function renderStaffSelectors(){for(const id of ["profile-member","shift-member"]){const select=el(id),previous=select.value;select.replaceChildren(new Option("Choose staff member",""));for(const m of (roster?.members||[]).filter(x=>x.state==="active")){const name=m.display_name||m.employee_reference||("Staff member "+m.membership_id.slice(0,8));select.append(new Option(name+" · "+describe(m.role)+(m.display_name&&m.employee_reference?" · "+m.employee_reference:""),m.membership_id));}if([...select.options].some(o=>o.value===previous))select.value=previous;}}
+  function renderSchedule(){renderStaffSelectors();
     const root=el("staff-roster"),shifts=el("staff-shifts");root.replaceChildren();shifts.replaceChildren();if(!roster)return;
     if(!roster.members.length)root.append(node("p","No authorized staff records returned.","case-empty"));
     for(const m of roster.members){
@@ -190,6 +191,7 @@
     }
   }
   async function loadRooms(){rooms=null;renderRooms();return run(slug=>api.rooms(slug),data=>{rooms=data;renderRooms();say("staff-message","Room conditions loaded. Occupancy is not verified.");});}
+  el("profile-member").addEventListener("change",()=>{const member=roster?.members.find(m=>m.membership_id===el("profile-member").value);el("profile-name").value=member?.display_name||"";el("profile-title").value=member?.job_title||"";el("profile-reference").value=member?.employee_reference||"";});
   el("schedule-range").addEventListener("submit",e=>{e.preventDefault();if(ctx.busy)return;try{range={start:iso(el("schedule-start").value),end:iso(el("schedule-end").value)};loadSchedule();}catch(e){say("staff-message",e.message);}});
   el("staff-profile-form").addEventListener("submit",async e=>{e.preventDefault();if(ctx.busy)return;const member=el("profile-member").value.trim(),body={display_name:el("profile-name").value.trim(),job_title:el("profile-title").value.trim(),employee_reference:el("profile-reference").value.trim()};if(!WF_UUID.test(member)||Object.values(body).some(x=>x.length<2)){say("staff-message","Enter a valid membership and profile.");return;}const ok=await mutate(()=>api.saveProfile(ctx.slug,member,body),loadSchedule,"Staff profile saved.");if(ok)el("staff-profile-form").reset();});
   el("shift-form").addEventListener("submit",async e=>{e.preventDefault();if(ctx.busy)return;try{const member=el("shift-member").value.trim(),start=iso(el("shift-start").value),end=iso(el("shift-end").value);const ok=await mutate(()=>api.createShift(ctx.slug,member,start,end),loadSchedule,"Shift scheduled by server.");if(ok)el("shift-form").reset();}catch(e){say("staff-message",e.message);}});
