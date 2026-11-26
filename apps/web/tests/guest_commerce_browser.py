@@ -62,6 +62,20 @@ def check_guest_commerce(browser, base):
                     route.fulfill(json={"resolution_id":INTENT,"decision":state["decision"],"duplicate":False,"current_case_status":state["case_status"]})
                 else:
                     route.fulfill(json={"case_id":CASE,"case_status":state["case_status"],"resolution_id":INTENT,"guest_decision":state["decision"],"guest_confirmed":state["decision"]=="confirm","awaiting_guest_confirmation":state["case_status"]=="resolved" and state["decision"] is None})
+            elif path == private + "/dining/orders":
+                if req.method == "POST":
+                    body=req.post_data_json
+                    assert body["room_id"] is None and body["lines"]==[{"item_id":ROOM,"quantity":2}]
+                    assert state["kind"]=="booking"
+                    state.setdefault("order_attempts",[]).append(body)
+                    if len(state["order_attempts"])==1:
+                        route.fulfill(status=503,json={"detail":"Outcome unknown"})
+                        return
+                    assert state["order_attempts"][0]==body
+                    state["order"]={"id":INTENT,"state":"submitted","room_id":None,"currency":"NGN","total_minor":500000,"created_at":"2026-11-26T15:00:00Z","lines":[{"name":"Synthetic meal","quantity":2,"unit_price_minor":250000}]}
+                    route.fulfill(json={**state["order"],"payment_confirmed":False,"duplicate":False})
+                else:
+                    route.fulfill(json={"orders":[state["order"]] if state.get("order") else [],"next_cursor":None})
             elif path == private + "/preferences":
                 if req.method == "PUT":
                     assert req.post_data_json["revision"] == 0
@@ -164,6 +178,16 @@ def check_guest_commerce(browser, base):
     expect(page.locator("#v1-copy")).to_be_hidden()
     page.locator("#guest-journey-bar a[href='#guest-commerce']").click()
     expect(page.locator("#guest-commerce")).to_be_visible()
+    state["case_status"]="queued"
+    page.locator("#guest-dining-menu").click()
+    page.locator("#guest-dining-items select").select_option(ROOM)
+    page.locator("#guest-dining-items input").fill("2")
+    expect(page.locator("#guest-dining-total")).to_contain_text("Menu estimate")
+    page.locator("#guest-dining-send").click()
+    expect(page.locator("#guest-dining-send")).to_have_text("Retry unchanged order")
+    expect(page.locator("#guest-dining-items select")).to_be_disabled()
+    page.locator("#guest-dining-send").click()
+    expect(page.locator("#guest-dining-orders")).to_contain_text("2 × Synthetic meal")
     page.locator("#commerce-refresh").click()
     expect(page.locator("#stay-room option").filter(has_text="Synthetic deluxe")).to_have_count(1)
     page.locator("#stay-room").select_option(ROOM)
