@@ -195,3 +195,8 @@ Next: investigate Actions issue #68 and obtain executed passing CI for browser P
 
 ## 2026-11-26 — Platform subscription contract records
 - Migration 057 adds operator-recorded immutable plan versions and nonoverlapping property subscription terms, with exact minor-unit price, contractual included AI allowance, evidence references and idempotency. Owner/manager/finance can read their own current contract. No production pricing selected, no invoices/charges/renewal/payment verification or enforced allowance claimed; native hotel operations unaffected. Cancellation/amendments and recurring payment reconciliation remain separate work. Regression tests cover tenant and role separation, conflicting replay, overlap and honest payment/usage state. CI and hosted migration pending.
+
+## 2026-11-26 — Remaining work quarter one
+- Migration 057 staging verified: CI 45871072317, 45871072748 successful; exact committed migration applied; provisioner alone writes, operations reads, anon/authenticated denied.
+- Migration 058 adds immutable operator-authorized contract cancellation and permits replacement after effective termination; active cancellation revokes in-flight AI reservations. No external billing cancellation/refund implied.
+- Migration 059 enforces contract-period weighted AI allowance before provider invocation; all reserved attempts count, text=1 and voice=3. Existing pilot properties without a contract retain existing daily limits and explicit AI approval; properties with term history need a current term. No exact monetary/token budget claim. Native hotel workflows unaffected. CI and staging 058/059 pending. See docs/REMAINING_WORK_QUARTERS.md for fixed package count.
