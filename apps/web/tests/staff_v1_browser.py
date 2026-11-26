@@ -185,6 +185,8 @@ def check_staff_v1(browser, base):
         elif path == prefix + "/venue-requests/" + CASE_ID + "/decision":
             state["venue"]="reviewed"
             route.fulfill(json={"id":CASE_ID,"state":"reviewed"})
+        elif path == prefix + "/finance" and state.get("overview_finance_denied"):
+            route.fulfill(status=403,json={"detail":"Finance access denied"})
         elif path == prefix + "/finance":
             route.fulfill(json={"invoices":[{"id":CASE_ID,"dining_order_id":TICKET_ID,"amount_minor":500000,"currency":"NGN","state":"issued"}],"payments":[{"id":TICKET_ID,"invoice_id":CASE_ID,"amount_minor":500000,"currency":"NGN","mode":"test","state":state.get("payment","pending"),"reference":"wf-"+TICKET_ID}],"refunds":[],"exceptions":[]})
         elif path == prefix + "/finance/invoices/" + CASE_ID + "/checkout":
@@ -327,6 +329,8 @@ def check_staff_v1(browser, base):
     page.locator("#schedule-end").fill("2026-11-27T00:00")
     page.get_by_role("button", name="Load schedule", exact=True).click()
     expect(page.locator("#staff-roster")).to_contain_text("Synthetic staff")
+    expect(page.locator("#profile-member")).to_contain_text("Synthetic staff")
+    expect(page.locator("#shift-member")).to_contain_text("Synthetic staff")
     page.get_by_role("button", name="Use for profile or shift").click()
     page.locator("summary").filter(has_text="Schedule a shift").click()
     page.locator("#shift-start").fill("2026-11-25T08:00")
@@ -400,6 +404,15 @@ def check_staff_v1(browser, base):
     select_module("Management")
     page.locator("#management-refresh").click()
     expect(page.locator("#management-summary")).to_contain_text("Items at/below reorder level")
+    expect(page.locator("#management-summary")).to_contain_text("Overdue work")
+    expect(page.locator("#management-summary")).to_contain_text("Clean rooms")
+    state["overview_finance_denied"] = True
+    page.locator("#management-refresh").click()
+    expect(page.locator("#management-summary")).to_contain_text("Showing 7 verified sections")
+    expect(page.locator("#management-summary")).not_to_contain_text("Issued invoices")
+    state["overview_finance_denied"] = False
+    page.get_by_role("button",name="Open procurement",exact=True).click()
+    expect(page.locator("#procurement-view")).to_be_visible()
     select_module("Procurement")
     page.locator("#batch-supplier").fill(MEMBER_ID)
     page.locator("#batch-lines [data-field=item_id]").fill(TICKET_ID)
@@ -471,6 +484,8 @@ def check_staff_v1(browser, base):
     expect(page.locator("#v1-cases")).to_be_empty()
     expect(page.locator("#v1-tickets")).to_be_empty()
     expect(page.locator("#staff-roster")).to_be_empty()
+    expect(page.locator("#profile-member option")).to_have_count(1)
+    expect(page.locator("#shift-member option")).to_have_count(1)
     expect(page.locator("#case-search")).to_have_value("")
     expect(page.locator("#ticket-search")).to_have_value("")
     expect(page.locator("#staff-rooms")).to_be_empty()
