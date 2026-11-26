@@ -57,3 +57,18 @@ test("document gateway is disabled by default; enabled routes accept only authen
   assert.equal((await fetch(base+"/api/v1/properties/html-test/staff/documents/"+id,{headers})).status,502);
  }finally{for(const server of [enabled,disabled,upstream])server.closeAllConnections();await Promise.all([enabled,disabled,upstream].map(server=>new Promise(r=>server.close(r))));}
 });
+
+test("voice gateway accepts bounded consented WAV only and strips identity",async()=>{
+ const seen=[];const upstream=http.createServer(async(req,res)=>{const parts=[];for await(const c of req)parts.push(c);seen.push({headers:req.headers,body:Buffer.concat(parts)});res.writeHead(200,{"Content-Type":"application/json"});res.end(JSON.stringify({status:"handoff"}));});
+ upstream.listen(0,"127.0.0.1");await once(upstream,"listening");
+ const gateway=http.createServer(handler({upstream:"http://127.0.0.1:"+upstream.address().port,identity:{enabled:false}}));gateway.listen(0,"127.0.0.1");await once(gateway,"listening");
+ const base="http://127.0.0.1:"+gateway.address().port+"/api/v1/properties/hotel-a/ai/voice",headers={"Content-Type":"audio/wav","X-Voice-Consent":"true",Authorization:"Bearer fixture.token","X-Receipt-Token":"fixture",Cookie:"private=fixture"},body=Buffer.from(await require("../guest-voice.js").pcmVoiceWav(new Float32Array(1600)).arrayBuffer());
+ try{
+ assert.equal((await fetch(base,{method:"POST",headers:{"Content-Type":"audio/wav"},body})).status,422);
+ assert.equal((await fetch(base,{method:"POST",headers:{...headers,"Content-Type":"text/html"},body})).status,422);
+ assert.equal((await fetch(base+"?other=1",{method:"POST",headers,body})).status,422);
+ assert.equal((await fetch(base,{method:"POST",headers,body:Buffer.alloc(640129)})).status,413);
+ assert.equal(seen.length,0);
+ assert.equal((await fetch(base,{method:"POST",headers,body})).status,200);assert.equal(seen.length,1);assert.deepEqual(seen[0].body,body);assert.equal(seen[0].headers["x-voice-consent"],"true");assert.equal(seen[0].headers.authorization,undefined);assert.equal(seen[0].headers["x-receipt-token"],undefined);assert.equal(seen[0].headers.cookie,undefined);
+ }finally{gateway.closeAllConnections();upstream.closeAllConnections();await Promise.all([gateway,upstream].map(s=>new Promise(r=>s.close(r))));}
+});
