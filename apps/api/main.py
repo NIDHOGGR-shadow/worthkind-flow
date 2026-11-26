@@ -568,3 +568,6 @@ install_voice_routes(app)
 
 from platform_crm_pg import install_platform_crm
 install_platform_crm(app)
+
+from email_notifications_pg import install_email_notifications
+install_email_notifications(app)

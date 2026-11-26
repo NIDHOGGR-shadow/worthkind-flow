@@ -24,7 +24,7 @@ import pytest
 
 MIGRATIONS = [
     Path(__file__).resolve().parents[3] / "db" / "migrations" / name
-    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql", "008_hotel_onboarding_settings.sql", "009_identity_provisioning.sql", "010_guest_quota.sql", "011_private_documents.sql", "012_operational_tickets.sql", "013_content_catalog.sql", "014_rooms_rates.sql", "015_rate_lookup_qualification.sql", "016_inventory_procurement.sql", "017_dining_kitchen.sql", "018_menu_lock_qualification.sql", "019_department_roles.sql", "020_staff_shifts.sql", "021_guest_preferences_feedback.sql", "022_reservation_intents.sql", "023_hotel_finance.sql", "024_events_recruitment.sql", "025_pms_accounts.sql", "026_reception_controls.sql", "027_payment_mode_boundaries.sql", "028_operations_read_contracts.sql", "029_native_booking_inventory.sql", "030_native_booking_changes.sql", "031_pos_receipt_evidence.sql", "032_purchase_batches.sql", "033_partial_refunds.sql", "034_native_stay_invoices.sql", "035_settlement_reconciliation.sql", "036_pms_reservation_evidence.sql", "037_native_stay_operations.sql", "038_pms_commands.sql", "039_provider_sync_guards.sql", "040_pos_refresh_worker.sql", "041_pos_cancellation_guard.sql", "042_pms_readback_recovery.sql", "043_provider_emergency_disable.sql", "044_ai_policy_and_retrieval.sql", "045_ai_automation_and_approvals.sql", "046_ai_retrieval_and_budget_guards.sql", "047_guest_resolution_decisions.sql", "048_staff_property_discovery.sql", "049_reception_handovers.sql", "050_management_reports.sql", "051_guest_department_tracking.sql", "052_staff_attendance.sql", "053_guest_dining_orders.sql", "054_staff_leave.sql", "055_platform_crm.sql")
+    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql", "008_hotel_onboarding_settings.sql", "009_identity_provisioning.sql", "010_guest_quota.sql", "011_private_documents.sql", "012_operational_tickets.sql", "013_content_catalog.sql", "014_rooms_rates.sql", "015_rate_lookup_qualification.sql", "016_inventory_procurement.sql", "017_dining_kitchen.sql", "018_menu_lock_qualification.sql", "019_department_roles.sql", "020_staff_shifts.sql", "021_guest_preferences_feedback.sql", "022_reservation_intents.sql", "023_hotel_finance.sql", "024_events_recruitment.sql", "025_pms_accounts.sql", "026_reception_controls.sql", "027_payment_mode_boundaries.sql", "028_operations_read_contracts.sql", "029_native_booking_inventory.sql", "030_native_booking_changes.sql", "031_pos_receipt_evidence.sql", "032_purchase_batches.sql", "033_partial_refunds.sql", "034_native_stay_invoices.sql", "035_settlement_reconciliation.sql", "036_pms_reservation_evidence.sql", "037_native_stay_operations.sql", "038_pms_commands.sql", "039_provider_sync_guards.sql", "040_pos_refresh_worker.sql", "041_pos_cancellation_guard.sql", "042_pms_readback_recovery.sql", "043_provider_emergency_disable.sql", "044_ai_policy_and_retrieval.sql", "045_ai_automation_and_approvals.sql", "046_ai_retrieval_and_budget_guards.sql", "047_guest_resolution_decisions.sql", "048_staff_property_discovery.sql", "049_reception_handovers.sql", "050_management_reports.sql", "051_guest_department_tracking.sql", "052_staff_attendance.sql", "053_guest_dining_orders.sql", "054_staff_leave.sql", "055_platform_crm.sql", "056_email_notifications.sql")
 ]
 
 
@@ -1744,3 +1744,52 @@ def test_platform_crm_consent_and_operator_boundary(pg, oidc_rig, monkeypatch):
             pg.execute("SELECT * FROM worthkind_flow.guest_cases")
     pg.execute("SELECT worthkind_flow.set_crm_operator(%s,false,'CI operator revocation')",(subject,))
     assert client.get(base,headers=sales).status_code==403
+
+
+def test_email_notifications_consent_and_provider_states(pg, seeded):
+    prop=seeded["property_a"]
+    case=seeded["case_a"]
+    owner="idp:hotel-a-owner"
+    event=uuid4()
+    pg.execute("UPDATE worthkind_flow.guest_cases SET encrypted_guest_payload=%s WHERE id=%s",(bytes(32),case))
+    pg.execute("INSERT INTO worthkind_flow.event_outbox(id,property_id,case_id,event_type) VALUES(%s,%s,%s,'case_responded')",(event,prop,case))
+    pg.execute("SELECT worthkind_flow.configure_email_notifications('hotel-a','test-account','hotel@example.invalid',true,'CI sender verification')")
+    queue="SELECT worthkind_flow.queue_email_notification(%s,%s,%s,%s,%s)"
+    params=(owner,"hotel-a",case,event,"CI contact verification")
+    with pytest.raises(errors.CheckViolation):
+        pg.execute(queue,params)
+    pg.execute("SELECT worthkind_flow.record_guest_consent('hotel-a',%s,repeat('b',64),'service_followup',true,'ci-policy')",(case,))
+    job=pg.execute(queue,params).fetchone()[0]
+    assert job["state"]=="pending"
+    assert pg.execute(queue,params).fetchone()[0]["duplicate"]
+    with pytest.raises(errors.InsufficientPrivilege):
+        pg.execute(queue,("idp:hotel-b-reception","hotel-a",case,event,"CI contact verification"))
+    with pg.transaction():
+        pg.execute("SET LOCAL ROLE wf_email_delivery")
+        lease=pg.execute("SELECT * FROM worthkind_flow.lease_email_notification()").fetchone()
+        assert str(lease[0])==job["id"] and lease[2]=="pending"
+        assert pg.execute("SELECT * FROM worthkind_flow.email_notification_payload(%s,%s)",lease[:2]).fetchone()
+        assert pg.execute("SELECT * FROM worthkind_flow.lease_email_notification()").fetchone() is None
+        provider=uuid4()
+        assert pg.execute("SELECT worthkind_flow.complete_email_notification(%s,%s,'accepted',%s)",(*lease[:2],provider)).fetchone()[0]
+    assert pg.execute("SELECT state FROM worthkind_flow.email_notifications WHERE id=%s",(job["id"],)).fetchone()[0]=="accepted"
+    pg.execute("UPDATE worthkind_flow.email_notifications SET next_attempt_at=now() WHERE id=%s",(job["id"],))
+    with pg.transaction():
+        pg.execute("SET LOCAL ROLE wf_email_delivery")
+        lease=pg.execute("SELECT * FROM worthkind_flow.lease_email_notification()").fetchone()
+        assert lease[2]=="accepted" and lease[5]==provider
+        assert pg.execute("SELECT * FROM worthkind_flow.email_notification_payload(%s,%s)",lease[:2]).fetchone() is None
+        assert pg.execute("SELECT worthkind_flow.complete_email_notification(%s,%s,'delivered',%s)",(*lease[:2],provider)).fetchone()[0]
+    assert pg.execute("SELECT state FROM worthkind_flow.email_notifications WHERE id=%s",(job["id"],)).fetchone()[0]=="delivered"
+    event2=pg.execute("INSERT INTO worthkind_flow.event_outbox(property_id,case_id,event_type) VALUES(%s,%s,'case_responded') RETURNING id",(prop,case)).fetchone()[0]
+    second=pg.execute(queue,(owner,"hotel-a",case,event2,"CI contact verification")).fetchone()[0]
+    pg.execute("SELECT worthkind_flow.record_guest_consent('hotel-a',%s,repeat('b',64),'service_followup',false,'ci-policy')",(case,))
+    with pg.transaction():
+        pg.execute("SET LOCAL ROLE wf_email_delivery")
+        lease=pg.execute("SELECT * FROM worthkind_flow.lease_email_notification()").fetchone()
+        assert str(lease[0])==second["id"]
+        assert pg.execute("SELECT * FROM worthkind_flow.email_notification_payload(%s,%s)",lease[:2]).fetchone() is None
+        assert pg.execute("SELECT worthkind_flow.complete_email_notification(%s,%s,'suppressed',NULL)",lease[:2]).fetchone()[0]
+    with pytest.raises(errors.InsufficientPrivilege):
+        with command_session(pg,"wf_guest_api"):
+            pg.execute("SELECT * FROM worthkind_flow.email_notifications")

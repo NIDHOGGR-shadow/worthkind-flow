@@ -19,6 +19,7 @@ services:
       WF_PROPERTY_CONFIG_POSTGRES_DSN: ${WF_PROPERTY_CONFIG_POSTGRES_DSN:?required}
       WF_GUEST_QUOTA_POSTGRES_DSN: ${WF_GUEST_QUOTA_POSTGRES_DSN:?required}
       WF_DOCUMENT_POSTGRES_DSN: ${WF_DOCUMENT_POSTGRES_DSN:?required}
+      WF_PLATFORM_CRM_POSTGRES_DSN: ${WF_PLATFORM_CRM_POSTGRES_DSN:-}
       WF_OPERATIONS_POSTGRES_DSN: ${WF_OPERATIONS_POSTGRES_DSN:?required}
       WF_PUBLIC_CONTENT_POSTGRES_DSN: ${WF_PUBLIC_CONTENT_POSTGRES_DSN:?required}
       WF_PAYMENT_PROVIDER_POSTGRES_DSN: ${WF_PAYMENT_PROVIDER_POSTGRES_DSN:-}
@@ -98,6 +99,28 @@ services:
     environment:
       WF_AI_AUTOMATION_ENABLED: '1'
       WF_AI_AUTOMATION_POSTGRES_DSN: ${WF_AI_AUTOMATION_POSTGRES_DSN:-}
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  email-delivery:
+    profiles: ["email-delivery"]
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    command: ["python","email_delivery_worker.py"]
+    environment:
+      WF_EMAIL_DELIVERY_ENABLED: ${WF_EMAIL_DELIVERY_ENABLED:-0}
+      WF_EMAIL_DELIVERY_POSTGRES_DSN: ${WF_EMAIL_DELIVERY_POSTGRES_DSN:-}
+      WF_RESEND_ACCOUNTS_JSON: ${WF_RESEND_ACCOUNTS_JSON:-}
+      WF_DATA_KEYS_JSON: ${WF_DATA_KEYS_JSON:-}
+      WF_DATA_ACTIVE_KEY_ID: ${WF_DATA_ACTIVE_KEY_ID:-}
+      WF_DATA_KEY_B64: ${WF_DATA_KEY_B64:-}
     read_only: true
     tmpfs:
       - /tmp
