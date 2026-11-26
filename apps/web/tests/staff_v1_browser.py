@@ -34,6 +34,9 @@ def check_staff_v1(browser, base):
         else:
             page.locator(".staff-v1-nav").get_by_role("button", name=label, exact=True).click()
         expect(page.locator(".staff-v1-nav button[aria-pressed=true]")).to_have_text(label)
+        expect(page.locator("#staff-current-module")).to_have_text("Selected module: " + label)
+        active = page.locator(".staff-v1-nav button[aria-pressed=true]").get_attribute("aria-controls")
+        expect(page.locator("#" + active)).to_be_visible()
 
     page.route("**/staff-auth-config.json", lambda route: route.fulfill(json={
         "enabled": True, "provider": "supabase", "url": PROVIDER,
@@ -267,6 +270,11 @@ def check_staff_v1(browser, base):
     expect(page.get_by_text("Synthetic guest", exact=True)).to_be_visible()
     expect(page.get_by_text("<img src=x>", exact=True)).to_be_visible()
     expect(page.locator("#v1-cases img")).to_have_count(0)
+    page.locator("#case-search").fill("no-matching-synthetic-record")
+    expect(page.locator("#v1-cases")).to_contain_text("No matching cases")
+    page.locator("#case-search").fill(CASE_ID)
+    expect(page.locator("#case-summary")).to_contain_text("1 of 1")
+    page.locator("#case-search").fill("")
     page.get_by_role("button", name="Claim case", exact=True).click()
     expect(page.get_by_role("button", name="Record response", exact=True)).to_be_visible()
     page.locator("#reply-" + CASE_ID).fill("Synthetic response")
@@ -279,6 +287,11 @@ def check_staff_v1(browser, base):
     select_module("Department work")
     page.locator("#load-tickets").click()
     expect(page.locator("#v1-tickets")).to_contain_text("Overdue")
+    page.locator("#ticket-search").fill("no-matching-synthetic-ticket")
+    expect(page.locator("#v1-tickets")).to_contain_text("No matching department tickets")
+    page.locator("#ticket-search").fill(TICKET_ID)
+    expect(page.locator("#ticket-summary")).to_contain_text("1 of 1")
+    page.locator("#ticket-search").fill("")
     page.get_by_role("button", name="Claim", exact=True).click()
     expect(page.locator("#v1-tickets")).to_contain_text("assigned")
     page.get_by_role("button", name="Load ticket history").click()
@@ -435,6 +448,8 @@ def check_staff_v1(browser, base):
     expect(page.locator("#v1-cases")).to_be_empty()
     expect(page.locator("#v1-tickets")).to_be_empty()
     expect(page.locator("#staff-roster")).to_be_empty()
+    expect(page.locator("#case-search")).to_have_value("")
+    expect(page.locator("#ticket-search")).to_have_value("")
     expect(page.locator("#staff-rooms")).to_be_empty()
     expect(page.locator("#finance-payments")).to_be_empty()
     expect(page.locator("#dining-queue")).to_be_empty()
