@@ -92,6 +92,7 @@ def check_guest_commerce(browser, base):
 
     page.route("**/api/v1/properties/**", api)
     page.goto(base + "/static/guest-v1.html")
+    expect(page.locator("#home")).to_have_attribute("data-guest-view","home")
     page.keyboard.press("Tab")
     expect(page.locator(".skip-link")).to_be_focused()
     for target in page.locator(".guest-service-index a").evaluate_all("(links) => links.map(a => a.getAttribute('href'))"):
