@@ -1,5 +1,5 @@
 "use strict";
-function initStaffManagement({session,ctx,run,mutate}){
+function initStaffManagement({session,ctx,run,mutate,navigate}){
  const el=id=>document.getElementById(id),say=t=>{el("staff-message").textContent=t;};
  const api=managementApi(window.fetch.bind(window),{token:()=>session().token()});
  const node=(tag,t)=>{const n=document.createElement(tag);if(t!==undefined)n.textContent=String(t);return n;};
@@ -44,6 +44,22 @@ function initStaffManagement({session,ctx,run,mutate}){
  el("load-applications").addEventListener("click",applications);
  async function feedback(){delete snapshot.feedback;el("feedback-records").replaceChildren();return run(s=>api.feedbackQueue(s),rows=>{const root=el("feedback-records");list(root,rows);for(const r of rows){const c=card(root,r.rating+"/5 · "+title(r.state),[r.comment,"Case "+r.case_id,r.created_at]);for(const a of r.state==="new"?["review"]:r.state==="reviewed"?["resolve"]:[])button(c,title(a),act(()=>api.feedbackReview(ctx.slug,r.id,a),feedback,"Feedback decision recorded. Not guest confirmation.","Confirm "+a+"?"));}snapshot.feedback=rows;say("Authorized feedback loaded.");});}
  el("load-feedback").addEventListener("click",feedback);
- el("management-refresh").addEventListener("click",()=>{const root=el("management-summary");root.replaceChildren();const rows=[];if(snapshot.content)rows.push(["Content versions loaded",snapshot.content.length]);if(snapshot.procurement){rows.push(["Stock records loaded",snapshot.procurement.items.length],["Items at/below reorder level",snapshot.procurement.items.filter(r=>Number(r.balance)<=Number(r.reorder_level)).length],["Purchase requests loaded",snapshot.procurement.orders.length]);}if(snapshot.applications)rows.push(["Applications loaded",snapshot.applications.length]);if(snapshot.feedback)rows.push(["Feedback records loaded",snapshot.feedback.length]);if(!rows.length)root.append(node("p","Load authorized module records first."));for(const [label,count] of rows)card(root,String(count),[label]);});
+ const overviewSession={token:()=>session().token()},overviewStaff=staffApi(window.fetch.bind(window),overviewSession),overviewCommerce=commerceApi(window.fetch.bind(window),overviewSession);
+ el("management-refresh").addEventListener("click",async()=>{if(ctx.busy||!ctx.slug)return;const root=el("management-summary");root.replaceChildren();await run(async slug=>{
+   const groups=[
+    ["Guest requests","cases",()=>overviewStaff.cases(slug),d=>[["Awaiting staff",d.cases.filter(x=>x.status==="queued").length],["Escalated",d.cases.filter(x=>x.status==="escalated").length]]],
+    ["Department work","tickets",()=>overviewStaff.tickets(slug),d=>[["Open work",d.filter(x=>x.status!=="resolved").length],["Overdue work",d.filter(x=>x.overdue&&x.status!=="resolved").length]]],
+    ["Room readiness","rooms",()=>overviewStaff.rooms(slug),d=>[["Clean rooms",d.filter(x=>x.operational_state==="clean").length],["Out of service",d.filter(x=>x.operational_state==="out_of_service").length]]],
+    ["Reservations","reservations",()=>overviewCommerce.reservationQueue(slug),d=>[["Awaiting review",d.filter(x=>x.state==="requested").length],["Under review",d.filter(x=>x.state==="under_review").length]]],
+    ["Dining","dining",()=>overviewCommerce.diningQueue(slug),d=>[["Active orders",d.filter(x=>["submitted","accepted","preparing","ready"].includes(x.state)).length]]],
+    ["Procurement","procurement",()=>api.procurement(slug),d=>[["Items at/below reorder level",d.items.filter(x=>x.active!==false&&Number(x.balance)<=Number(x.reorder_level)).length],["Purchase requests loaded",d.orders.length]]],
+    ["Guest feedback","feedback",()=>api.feedbackQueue(slug),d=>[["New feedback",d.filter(x=>x.state==="new").length]]],
+    ["Finance","finance",()=>overviewCommerce.finance(slug),d=>[["Unresolved exceptions",d.exceptions.filter(x=>!["resolved","closed"].includes(x.state)).length],["Issued invoices",d.invoices.filter(x=>x.state==="issued").length]]]
+   ];
+   const output=await Promise.allSettled(groups.map(async ([label,view,load,metrics])=>({label,view,metrics:metrics(await load())})));
+   const rejected=output.filter(x=>x.status==="rejected");const expired=rejected.find(x=>x.reason?.status===401);if(expired)throw expired.reason;
+   const verified=output.filter(x=>x.status==="fulfilled").map(x=>x.value);if(!verified.length)throw rejected[0]?.reason||Error("No overview records returned.");
+   return {verified,omitted:groups.length-verified.length};
+  },d=>{const meta=node("p","Snapshot refreshed "+new Date().toLocaleTimeString()+". Counts cover returned records, not complete business totals.");meta.className="overview-meta";root.append(meta);const grid=node("div");grid.className="operations-overview-grid";root.append(grid);for(const g of d.verified){const c=card(grid,g.label,[]);for(const [label,count] of g.metrics){const metric=node("div");metric.className="operations-overview-metric";metric.append(node("strong",count),node("span",label));c.append(metric);}button(c,"Open "+g.label.toLowerCase(),()=>{if(!ctx.busy)navigate(g.view);});}if(d.omitted){root.append(node("p","Showing "+d.verified.length+" verified sections. Other sections were not returned for this account or could not be refreshed."));}say("Operational overview refreshed.");},"Refreshing authorized hotel records…");});
  return {clear,controls,get pending(){return pending.size>0;}};
 }
