@@ -24,7 +24,7 @@ import pytest
 
 MIGRATIONS = [
     Path(__file__).resolve().parents[3] / "db" / "migrations" / name
-    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql", "008_hotel_onboarding_settings.sql", "009_identity_provisioning.sql", "010_guest_quota.sql", "011_private_documents.sql", "012_operational_tickets.sql", "013_content_catalog.sql", "014_rooms_rates.sql", "015_rate_lookup_qualification.sql", "016_inventory_procurement.sql", "017_dining_kitchen.sql", "018_menu_lock_qualification.sql", "019_department_roles.sql", "020_staff_shifts.sql", "021_guest_preferences_feedback.sql", "022_reservation_intents.sql", "023_hotel_finance.sql", "024_events_recruitment.sql", "025_pms_accounts.sql", "026_reception_controls.sql", "027_payment_mode_boundaries.sql", "028_operations_read_contracts.sql", "029_native_booking_inventory.sql", "030_native_booking_changes.sql", "031_pos_receipt_evidence.sql", "032_purchase_batches.sql", "033_partial_refunds.sql", "034_native_stay_invoices.sql", "035_settlement_reconciliation.sql", "036_pms_reservation_evidence.sql", "037_native_stay_operations.sql", "038_pms_commands.sql", "039_provider_sync_guards.sql", "040_pos_refresh_worker.sql", "041_pos_cancellation_guard.sql", "042_pms_readback_recovery.sql", "043_provider_emergency_disable.sql", "044_ai_policy_and_retrieval.sql", "045_ai_automation_and_approvals.sql", "046_ai_retrieval_and_budget_guards.sql")
+    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql", "008_hotel_onboarding_settings.sql", "009_identity_provisioning.sql", "010_guest_quota.sql", "011_private_documents.sql", "012_operational_tickets.sql", "013_content_catalog.sql", "014_rooms_rates.sql", "015_rate_lookup_qualification.sql", "016_inventory_procurement.sql", "017_dining_kitchen.sql", "018_menu_lock_qualification.sql", "019_department_roles.sql", "020_staff_shifts.sql", "021_guest_preferences_feedback.sql", "022_reservation_intents.sql", "023_hotel_finance.sql", "024_events_recruitment.sql", "025_pms_accounts.sql", "026_reception_controls.sql", "027_payment_mode_boundaries.sql", "028_operations_read_contracts.sql", "029_native_booking_inventory.sql", "030_native_booking_changes.sql", "031_pos_receipt_evidence.sql", "032_purchase_batches.sql", "033_partial_refunds.sql", "034_native_stay_invoices.sql", "035_settlement_reconciliation.sql", "036_pms_reservation_evidence.sql", "037_native_stay_operations.sql", "038_pms_commands.sql", "039_provider_sync_guards.sql", "040_pos_refresh_worker.sql", "041_pos_cancellation_guard.sql", "042_pms_readback_recovery.sql", "043_provider_emergency_disable.sql", "044_ai_policy_and_retrieval.sql", "045_ai_automation_and_approvals.sql", "046_ai_retrieval_and_budget_guards.sql", "047_guest_resolution_decisions.sql")
 ]
 
 
@@ -1383,3 +1383,61 @@ def test_ai_platform_budget_retrieval_snapshot_and_approval(pg, seeded):
             pg.execute("SELECT worthkind_flow.begin_ai_call(%s,NULL,'guest_chat')",(slug,))
     finally:
         pg.execute("SELECT worthkind_flow.configure_ai_platform(false,1000)")
+
+
+def test_guest_resolution_requires_receipt_and_current_staff_resolution(pg, seeded):
+    case=seeded["case_a"]
+    owner="idp:hotel-a-owner"
+    read="SELECT worthkind_flow.read_guest_resolution(%s,%s,%s)"
+    decide="SELECT worthkind_flow.decide_guest_resolution(%s,%s,%s,%s,%s)"
+    staff_read="SELECT worthkind_flow.read_staff_resolution(%s,%s,%s)"
+    proof="b"*64
+    def guest_read(slug="hotel-a",receipt=proof):
+        with command_session(pg,"wf_guest_api"):
+            return pg.execute(read,(slug,case,receipt)).fetchone()[0]
+    def guest_decide(resolution,action,slug="hotel-a",receipt=proof):
+        with command_session(pg,"wf_guest_api"):
+            return pg.execute(decide,(slug,case,receipt,resolution,action)).fetchone()[0]
+    def staff_resolve():
+        pg.execute("UPDATE worthkind_flow.guest_cases SET state='responded',assigned_membership_id=%s WHERE id=%s",(seeded["members"]["owner"],case))
+        return pg.execute("SELECT worthkind_flow.control_reception_case(%s,%s,%s,'resolve',NULL,%s)",(owner,"hotel-a",case,bytes(32))).fetchone()[0]
+    assert not guest_read()["guest_confirmed"]
+    with pytest.raises(errors.CheckViolation):
+        guest_decide(uuid4(),"confirm")
+    assert staff_resolve()=="resolved"
+    first=guest_read()
+    assert first["awaiting_guest_confirmation"] and not first["guest_confirmed"]
+    first_id=first["resolution_id"]
+    for slug,receipt in (("hotel-b",proof),("hotel-a","c"*64)):
+        with pytest.raises(errors.NoDataFound):
+            guest_read(slug,receipt)
+        with pytest.raises(errors.NoDataFound):
+            guest_decide(first_id,"confirm",slug,receipt)
+    reopened=guest_decide(first_id,"reopen")
+    assert reopened["current_case_status"]=="queued" and not reopened["duplicate"]
+    assert guest_decide(first_id,"reopen")["duplicate"]
+    with pytest.raises(errors.CheckViolation):
+        guest_decide(first_id,"confirm")
+    assert pg.execute("SELECT assigned_membership_id FROM worthkind_flow.guest_cases WHERE id=%s",(case,)).fetchone()[0] is None
+    assert staff_resolve()=="resolved"
+    second=guest_read()
+    second_id=second["resolution_id"]
+    assert second_id!=first_id and second["awaiting_guest_confirmation"]
+    assert guest_decide(first_id,"reopen")["current_case_status"]=="resolved"
+    assert guest_decide(second_id,"confirm")["decision"]=="confirm"
+    assert guest_decide(second_id,"confirm")["duplicate"]
+    assert guest_read()["guest_confirmed"]
+    with pytest.raises(errors.CheckViolation):
+        guest_decide(second_id,"reopen")
+    with pg.transaction():
+        pg.execute("SET LOCAL ROLE wf_operations")
+        assert pg.execute(staff_read,(owner,"hotel-a",case)).fetchone()[0]["guest_confirmed"]
+    for subject in ("idp:hotel-a-housekeeper","idp:hotel-b-reception","idp:hotel-a-invited","idp:hotel-a-suspended"):
+        with pytest.raises(errors.InsufficientPrivilege):
+            with pg.transaction():
+                pg.execute("SET LOCAL ROLE wf_operations")
+                pg.execute(staff_read,(subject,"hotel-a",case))
+    with pytest.raises(errors.InsufficientPrivilege):
+        with command_session(pg,"wf_guest_api"):
+            pg.execute("SELECT * FROM worthkind_flow.guest_resolution_decisions")
+    assert pg.execute("SELECT count(*) FROM worthkind_flow.event_outbox WHERE case_id=%s AND event_type IN ('guest_case_reopened','guest_resolution_confirmed')",(case,)).fetchone()[0]==2

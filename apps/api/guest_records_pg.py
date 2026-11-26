@@ -22,6 +22,10 @@ class Feedback(BaseModel):
     rating:int=Field(ge=1,le=5)
     comment:str=Field(default="",max_length=2000)
 
+class ResolutionDecision(BaseModel):
+    resolution_id:UUID
+    decision:Literal["confirm","reopen"]
+
 class Review(BaseModel):
     action:Literal["review","resolve"]
 
@@ -34,6 +38,18 @@ def proof(token):
 def install_guest_records(app):
     base="/api/v1/properties/{slug}"
     g=base+"/guest/cases/{case_id}"
+    @app.get(g+"/resolution",dependencies=[Depends(enforce_guest_quota)])
+    def guest_resolution(slug:str,case_id:UUID,x_receipt_token:str|None=Header(None)):
+        return command("SELECT worthkind_flow.read_guest_resolution(%s,%s,%s)",(slug,case_id,proof(x_receipt_token)),guest=True)[0]
+
+    @app.post(g+"/resolution",dependencies=[Depends(enforce_guest_quota)])
+    def decide_resolution(slug:str,case_id:UUID,body:ResolutionDecision,x_receipt_token:str|None=Header(None)):
+        return command("SELECT worthkind_flow.decide_guest_resolution(%s,%s,%s,%s,%s)",(slug,case_id,proof(x_receipt_token),body.resolution_id,body.decision),guest=True)[0]
+
+    @app.get(base+"/staff/cases/{case_id}/resolution")
+    def staff_resolution(slug:str,case_id:UUID,authorization:str|None=Header(None)):
+        return command("SELECT worthkind_flow.read_staff_resolution(%s,%s,%s)",(actor(authorization),slug,case_id))[0]
+
     @app.put(g+"/preferences",dependencies=[Depends(enforce_guest_quota)])
     def save(slug:str,case_id:UUID,body:Preferences,x_receipt_token:str|None=Header(None)):
         h=proof(x_receipt_token)
