@@ -171,3 +171,6 @@ Next: investigate Actions issue #68 and obtain executed passing CI for browser P
 
 ## 2026-11-26 — Guest dining orders
 - Migration 053 enables receipt-scoped order creation and history using authoritative menu prices and the existing kitchen state machine. Guest actor recorded explicitly, not a fabricated staff identity. Room service requires native checked-in occupancy linked to the same booking case; food cases may order without a room. No automatic payment or POS claim. Regression covers receipt, room denial, price, replay, state visibility and tenant isolation. Positive native room service acceptance and hosted HTTP remain pending; CI pending.
+
+## 2026-11-26 — Staff leave requests
+- Migration 054 adds self-service leave, independent owner/manager/HR decisions, withdraw before decision and manager cancellation before start. Approved leave blocks overlapping scheduled shifts and requires preexisting shifts resolved before approval; no payroll or entitlement calculation. Request and decision replay is idempotent and audited. Signed-token PostgreSQL/API regression added; CI and hosted acceptance pending.

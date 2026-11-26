@@ -33,8 +33,35 @@ class AttendanceAction(BaseModel):
     action:Literal["check_in","check_out"]
 
 
+class LeaveRequest(BaseModel):
+    request_key:UUID
+    starts_at:AwareDatetime
+    ends_at:AwareDatetime
+    leave_kind:Literal["annual","sick","personal","other"]
+
+class LeaveDecision(BaseModel):
+    action:Literal["approve","decline","withdraw","cancel"]
+
+
 def install_staff_operations(app):
     base="/api/v1/properties/{slug}/staff"
+    @app.post(base+"/leave",status_code=201)
+    def request_leave(slug:str,body:LeaveRequest,authorization:str|None=Header(None)):
+        return command("SELECT worthkind_flow.request_staff_leave(%s,%s,%s,%s,%s,%s)",
+                       (actor(authorization),slug,body.request_key,body.starts_at,body.ends_at,body.leave_kind))[0]
+
+    @app.post(base+"/leave/{leave_id}/decision")
+    def decide_leave(slug:str,leave_id:UUID,body:LeaveDecision,authorization:str|None=Header(None)):
+        return command("SELECT worthkind_flow.decide_staff_leave(%s,%s,%s,%s)",
+                       (actor(authorization),slug,leave_id,body.action))[0]
+
+    @app.get(base+"/leave")
+    def leave_requests(slug:str,after:UUID|None=None,limit:int=Query(50,ge=1,le=100),authorization:str|None=Header(None)):
+        rows=command("SELECT * FROM worthkind_flow.list_staff_leave(%s,%s,%s,%s)",(actor(authorization),slug,after,limit+1),many=True)
+        return {"requests":[{"id":str(r[0]),"membership_id":str(r[1]),"starts_at":r[2].isoformat(),
+                "ends_at":r[3].isoformat(),"leave_kind":r[4],"state":r[5],"created_at":r[6].isoformat()} for r in rows[:limit]],
+                "next_cursor":str(rows[limit-1][0]) if len(rows)>limit else None}
+
     @app.post(base+"/shifts/{shift_id}/attendance")
     def record_attendance(slug:str,shift_id:UUID,body:AttendanceAction,authorization:str|None=Header(None)):
         return command("SELECT worthkind_flow.record_staff_attendance(%s,%s,%s,%s)",
