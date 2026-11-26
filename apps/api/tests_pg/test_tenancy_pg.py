@@ -24,7 +24,7 @@ import pytest
 
 MIGRATIONS = [
     Path(__file__).resolve().parents[3] / "db" / "migrations" / name
-    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql", "008_hotel_onboarding_settings.sql", "009_identity_provisioning.sql", "010_guest_quota.sql", "011_private_documents.sql", "012_operational_tickets.sql", "013_content_catalog.sql", "014_rooms_rates.sql", "015_rate_lookup_qualification.sql", "016_inventory_procurement.sql", "017_dining_kitchen.sql", "018_menu_lock_qualification.sql", "019_department_roles.sql", "020_staff_shifts.sql", "021_guest_preferences_feedback.sql", "022_reservation_intents.sql", "023_hotel_finance.sql", "024_events_recruitment.sql", "025_pms_accounts.sql", "026_reception_controls.sql", "027_payment_mode_boundaries.sql", "028_operations_read_contracts.sql", "029_native_booking_inventory.sql", "030_native_booking_changes.sql", "031_pos_receipt_evidence.sql", "032_purchase_batches.sql", "033_partial_refunds.sql", "034_native_stay_invoices.sql", "035_settlement_reconciliation.sql", "036_pms_reservation_evidence.sql", "037_native_stay_operations.sql", "038_pms_commands.sql", "039_provider_sync_guards.sql", "040_pos_refresh_worker.sql", "041_pos_cancellation_guard.sql", "042_pms_readback_recovery.sql", "043_provider_emergency_disable.sql", "044_ai_policy_and_retrieval.sql", "045_ai_automation_and_approvals.sql", "046_ai_retrieval_and_budget_guards.sql", "047_guest_resolution_decisions.sql")
+    for name in ("001_tenant_staff_foundation.sql", "002_atomic_case_commands.sql", "003_verified_staff_lookup.sql", "004_encrypted_guest_case.sql", "005_suspended_organization_read_boundary.sql", "006_staff_membership_lifecycle.sql", "007_internal_event_projection.sql", "008_hotel_onboarding_settings.sql", "009_identity_provisioning.sql", "010_guest_quota.sql", "011_private_documents.sql", "012_operational_tickets.sql", "013_content_catalog.sql", "014_rooms_rates.sql", "015_rate_lookup_qualification.sql", "016_inventory_procurement.sql", "017_dining_kitchen.sql", "018_menu_lock_qualification.sql", "019_department_roles.sql", "020_staff_shifts.sql", "021_guest_preferences_feedback.sql", "022_reservation_intents.sql", "023_hotel_finance.sql", "024_events_recruitment.sql", "025_pms_accounts.sql", "026_reception_controls.sql", "027_payment_mode_boundaries.sql", "028_operations_read_contracts.sql", "029_native_booking_inventory.sql", "030_native_booking_changes.sql", "031_pos_receipt_evidence.sql", "032_purchase_batches.sql", "033_partial_refunds.sql", "034_native_stay_invoices.sql", "035_settlement_reconciliation.sql", "036_pms_reservation_evidence.sql", "037_native_stay_operations.sql", "038_pms_commands.sql", "039_provider_sync_guards.sql", "040_pos_refresh_worker.sql", "041_pos_cancellation_guard.sql", "042_pms_readback_recovery.sql", "043_provider_emergency_disable.sql", "044_ai_policy_and_retrieval.sql", "045_ai_automation_and_approvals.sql", "046_ai_retrieval_and_budget_guards.sql", "047_guest_resolution_decisions.sql", "048_staff_property_discovery.sql")
 ]
 
 
@@ -1441,3 +1441,41 @@ def test_guest_resolution_requires_receipt_and_current_staff_resolution(pg, seed
         with command_session(pg,"wf_guest_api"):
             pg.execute("SELECT * FROM worthkind_flow.guest_resolution_decisions")
     assert pg.execute("SELECT count(*) FROM worthkind_flow.event_outbox WHERE case_id=%s AND event_type IN ('guest_case_reopened','guest_resolution_confirmed')",(case,)).fetchone()[0]==2
+
+
+def test_staff_property_discovery_and_revocation(pg, oidc_rig, monkeypatch):
+    client,key,source=oidc_rig
+    monkeypatch.setenv("WF_OPERATIONS_POSTGRES_DSN",os.environ["WF_STAFF_POSTGRES_DSN"])
+    path="/api/v1/staff/properties"
+    def headers(subject):
+        return auth_header(signed_token(key,subject))
+    def get(subject,query=""):
+        response=client.get(path+query,headers=headers(subject))
+        assert response.status_code==200,response.text
+        return response.json()
+    owner="idp:hotel-a-owner"
+    invited="idp:hotel-a-invited"
+    assert client.get(path).status_code==401
+    assert client.get(path,headers=auth_header("bad-token")).status_code==401
+    assert get(owner)["properties"][0]["slug"]=="hotel-a"
+    assert get("idp:hotel-b-reception")["properties"][0]["slug"]=="hotel-b"
+    assert get("idp:hotel-a-housekeeper")["properties"][0]["role"]=="housekeeping"
+    assert get(invited)["properties"][0]["membership_state"]=="invited"
+    assert client.get("/api/v1/properties/hotel-a/staff/tickets",headers=headers(invited)).status_code==403
+    assert get("idp:hotel-a-suspended")["properties"]==[]
+    assert get("idp:unknown-subject")["properties"]==[]
+    pg.execute("INSERT INTO worthkind_flow.staff_memberships(organization_id,property_id,identity_id,role,state,activated_at) VALUES(%s,%s,%s,'reception','active',now())",
+               (source["org_b"],source["property_b"],source["owner"]))
+    first=get(owner,"?limit=1")
+    assert [p["slug"] for p in first["properties"]]==["hotel-a"]
+    assert first["next_cursor"]=="hotel-a"
+    second=get(owner,"?limit=1&after=hotel-a")
+    assert [p["slug"] for p in second["properties"]]==["hotel-b"] and second["next_cursor"] is None
+    pg.execute("UPDATE worthkind_flow.staff_memberships SET state='revoked',revoked_at=now() WHERE id=%s",(source["members"]["owner"],))
+    assert [p["slug"] for p in get(owner)["properties"]]==["hotel-b"]
+    pg.execute("UPDATE worthkind_flow.organizations SET status='suspended' WHERE id=%s",(source["org_b"],))
+    assert get(owner)["properties"]==[]
+    assert get("idp:hotel-b-reception")["properties"]==[]
+    with pytest.raises(errors.InsufficientPrivilege):
+        with command_session(pg,"wf_guest_api"):
+            pg.execute("SELECT * FROM worthkind_flow.list_staff_properties(%s,NULL,10)",(owner,))

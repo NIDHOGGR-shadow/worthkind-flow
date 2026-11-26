@@ -73,6 +73,15 @@ def decrypt(value,aad):
 
 
 def install_operations_pg_routes(app):
+    @app.get("/api/v1/staff/properties")
+    def staff_properties(after: str | None = Query(None,pattern=r"^[a-z0-9][a-z0-9-]{1,79}$"),
+                         limit: int = Query(50,ge=1,le=100),authorization: str | None = Header(None)):
+        rows=command("SELECT * FROM worthkind_flow.list_staff_properties(%s,%s,%s)",
+                     (actor(authorization),after,limit+1),many=True)
+        return {"properties":[{"id":str(r[0]),"slug":r[1],"display_name":r[2],"time_zone":r[3],
+                               "role":r[4],"membership_state":r[5]} for r in rows[:limit]],
+                "next_cursor":rows[limit-1][1] if len(rows)>limit else None}
+
     @app.post("/api/v1/properties/{slug}/staff/tickets",status_code=201)
     def create(slug:str,body:TicketCreate,authorization:str|None=Header(None)):
         subject=actor(authorization)
