@@ -9,7 +9,7 @@
   const randomKey=()=>Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,"0")).join("");
   const describe=s=>String(s).replaceAll("_"," ");
   const commerce=initStaffCommerce({session:()=>session,ctx,run,mutate});
-  const management=initStaffManagement({session:()=>session,ctx,run,mutate});
+  const management=initStaffManagement({session:()=>session,ctx,run,mutate,navigate:showView});
   const native=initNativeStaff({session:()=>session,ctx,run,mutate});
   const evidence=initProviderEvidence({session:()=>session,ctx,run,mutate});
   const documents=initPrivateDocuments({session:()=>session,ctx,run});
