@@ -1,6 +1,7 @@
 "use strict";
 const CRM_STAGES=["prospect","discovery","consented_waitlist","written_pilot_interest","closed"];
 function platformCrmApi(fetcher,session){
+ const staffError=(message,status=0)=>Object.assign(new Error(message),{status});
  const base="/api/v1/platform/crm/prospects",uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
  const str=(s,min,max)=>typeof s==="string"&&s.length>=min&&s.length<=max;
  const valid=v=>{if(!v)throw staffError("Invalid details or unexpected CRM response.");};
