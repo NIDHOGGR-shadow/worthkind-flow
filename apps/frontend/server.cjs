@@ -5,8 +5,8 @@ const path=require("node:path");
 const {staffConfig}=require("../web/staff-v1-core.js");
 const WEB=path.resolve(__dirname,"../web");
 const ASSETS=new Map([
- ["/","guest-v1.html"],["/staff","staff-v1.html"],
- ...["guest-v1.html","staff-v1.html","styles.css","guest-v1-core.js","guest-v1.js","staff-v1-core.js","staff-v1.js","commerce-core.js","guest-commerce.js","staff-commerce.js","management-core.js","staff-management.js","guest-management.js","native-booking-core.js","native-booking-guest.js","native-booking-staff.js","provider-evidence-core.js","provider-evidence-ui.js","private-documents.js","ai-studio-core.js","ai-studio-ui.js","guest-ai.js","guest-voice.js"].map(f=>["/static/"+f,f])
+ ["/","guest-v1.html"],["/staff","staff-v1.html"],["/platform","platform-crm.html"],
+ ...["guest-v1.html","staff-v1.html","platform-crm.html","platform-crm.js","styles.css","guest-v1-core.js","guest-v1.js","staff-v1-core.js","staff-v1.js","commerce-core.js","guest-commerce.js","staff-commerce.js","management-core.js","staff-management.js","guest-management.js","native-booking-core.js","native-booking-guest.js","native-booking-staff.js","provider-evidence-core.js","provider-evidence-ui.js","private-documents.js","ai-studio-core.js","ai-studio-ui.js","guest-ai.js","guest-voice.js"].map(f=>["/static/"+f,f])
 ]);
 const LIMIT=2_000_000, RESPONSE_LIMIT=8_000_000;
 const UUID="[0-9a-fA-F-]{36}";
@@ -73,7 +73,9 @@ function handler({upstream,identity,documentsEnabled=false},fetcher=fetch){
      const file=ASSETS.get(url.pathname);
      if(file){try{const body=await readFile(path.join(WEB,file));const type=file.endsWith(".html")?"text/html":file.endsWith(".css")?"text/css":"text/javascript";res.writeHead(200,{...base,"Content-Type":type+"; charset=utf-8","Content-Length":body.length});res.end(method==="HEAD"?undefined:body);}catch{json(res,503,{detail:"Frontend asset unavailable"},base);}return;}
    }
-   if(!(method==="GET"&&url.pathname==="/api/v1/staff/properties")&&!allowed.some(([m,re])=>m===method&&re.test(url.pathname))){json(res,404,{detail:"Not found"},base);return;}
+   const crmPath="/api/v1/platform/crm/prospects",crm=(url.pathname===crmPath&&["GET","POST"].includes(method))||(method==="POST"&&new RegExp("^"+crmPath+"/"+UUID+"/change$").test(url.pathname));
+   if(crm&&!/^Bearer [^\\s]+$/.test(req.headers.authorization||"")){json(res,401,{detail:"Platform authentication required"},base);return;}
+   if(!crm&&!(method==="GET"&&url.pathname==="/api/v1/staff/properties")&&!allowed.some(([m,re])=>m===method&&re.test(url.pathname))){json(res,404,{detail:"Not found"},base);return;}
    const voice=method==="POST"&&/\/ai\/voice$/.test(url.pathname);
    const upload=method==="POST"&&/\/staff\/documents$/.test(url.pathname);
    const download=method==="GET"&&new RegExp("/staff/documents/"+UUID+"$").test(url.pathname);
