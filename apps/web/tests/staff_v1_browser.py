@@ -214,6 +214,13 @@ def check_staff_v1(browser, base):
         elif path == prefix + "/cases/" + CASE_ID + "/claim":
             state["case"] = "claimed"
             route.fulfill(json={"property": "hotel-a", "case_id": CASE_ID, "status": "claimed"})
+        elif path == prefix + "/cases/" + CASE_ID + "/notifications":
+            if request.method=="POST":
+                assert request.post_data_json=={"event_id":TICKET_ID,"verification_reference":"Verified contact reference"}
+                state["email_state"]="pending"
+                route.fulfill(json={"id":MEMBER_ID,"state":"pending","duplicate":False})
+            else:
+                route.fulfill(json={"notifications":[{"event_id":TICKET_ID,"event_type":"case_responded","created_at":"2026-11-26T15:00:00Z","notification_id":MEMBER_ID if state.get("email_state") else None,"state":state.get("email_state","not_queued")}]})
         elif path == prefix + "/cases/" + CASE_ID + "/respond":
             assert request.post_data_json["message"] == "Synthetic response"
             state["case"] = "responded"
@@ -338,6 +345,11 @@ def check_staff_v1(browser, base):
     page.locator("#reply-" + CASE_ID).fill("Synthetic response")
     page.get_by_role("button", name="Record response", exact=True).click()
     expect(page.locator("#v1-cases")).to_contain_text("responded")
+    page.get_by_text("Service email notifications",exact=True).click()
+    page.get_by_role("button",name="Refresh notification records").click()
+    page.locator("#email-evidence-"+TICKET_ID).fill("Verified contact reference")
+    page.get_by_role("button",name="Queue service email").click()
+    expect(page.locator("#v1-cases")).to_contain_text("Queued, not sent")
     page.get_by_text("Case controls", exact=True).click()
     page.locator("#reason-" + CASE_ID).fill("Manager review requested")
     page.get_by_role("button", name="Escalate", exact=True).click()
@@ -597,4 +609,56 @@ def check_staff_v1(browser, base):
     expect(page.locator("#property-discovery-list")).to_be_empty()
     assert all(path.startswith("/api/v1/") for _, path in calls)
     page.close()
+    check_platform_crm(browser, base)
     print("PASS: staff v1 Chromium fixture journey and 114 authenticated-layout checks")
+
+def check_platform_crm(browser, base):
+    page=browser.new_page(viewport={"width":390,"height":900})
+    page.on("dialog",lambda d:d.accept())
+    state={"authorized":False,"row":None}
+    page.route("**/staff-auth-config.json",lambda r:r.fulfill(json={"enabled":True,"provider":"supabase","url":PROVIDER,"publishableKey":"sb_publishable_fixture"}))
+    page.route(PROVIDER+"/auth/v1/**",lambda r:r.fulfill(json={"access_token":"fixture.token.value","expires_in":3600,"user":{"role":"authenticated","is_anonymous":False,"email_confirmed_at":"2026-11-26"}}))
+    def api(route):
+        req=route.request
+        assert req.headers.get("authorization")=="Bearer fixture.token.value"
+        if not state["authorized"]:
+            route.fulfill(status=403,json={"detail":"Denied"})
+        elif req.method=="GET":
+            route.fulfill(json={"prospects":[state["row"]] if state["row"] else [],"next_cursor":None})
+        elif urlsplit(req.url).path.endswith("/change"):
+            body=req.post_data_json
+            assert body["action"]=="stage" and body["value"]=="discovery" and body["revision"]==1
+            state["row"].update(stage="discovery",revision=2)
+            route.fulfill(json={"id":CASE_ID,"stage":"discovery","revision":2,"duplicate":False,"outreach_allowed":False})
+        else:
+            state["row"]={**req.post_data_json,"id":CASE_ID,"stage":"prospect","revision":1,"outreach_allowed":False,"created_at":"2026-11-26T15:00:00Z"}
+            route.fulfill(json={"id":CASE_ID,"stage":"prospect","revision":1,"duplicate":False})
+    page.route("**/api/v1/platform/crm/prospects**",api)
+    page.goto(base+"/static/platform-crm.html")
+    def login():
+        page.locator("#platform-email").fill("fixture@example.invalid")
+        page.locator("#platform-password").fill("fixture-password")
+        page.locator("#platform-login-button").click()
+    login()
+    expect(page.locator("#platform-login-status")).to_contain_text("access denied")
+    expect(page.locator("#platform-workspace")).to_be_hidden()
+    state["authorized"]=True
+    login()
+    expect(page.locator("#platform-workspace")).to_be_visible()
+    page.locator("#platform-key").fill("hotel-fixture")
+    page.locator("#platform-name").fill("Synthetic hotel prospect")
+    page.locator("#platform-source").fill("Fixture business enquiry")
+    page.locator("#platform-create-send").click()
+    expect(page.locator("#platform-list")).to_contain_text("Synthetic hotel prospect")
+    page.locator("#platform-action").select_option("stage:discovery")
+    page.locator("#platform-evidence").fill("Discovery meeting reference")
+    page.locator("#platform-change-send").click()
+    expect(page.locator("#platform-detail-status")).to_contain_text("Discovery")
+    for width in WIDTHS:
+        page.set_viewport_size({"width":width,"height":900})
+        assert page.evaluate("Math.max(document.documentElement.scrollWidth, document.body.scrollWidth)")<=width+2
+    page.locator("#platform-signout").click()
+    expect(page.locator("#platform-workspace")).to_be_hidden()
+    expect(page.locator("#platform-list")).to_be_empty()
+    page.close()
+    print("PASS: platform CRM independent access, evidenced decision and six viewport checks")
