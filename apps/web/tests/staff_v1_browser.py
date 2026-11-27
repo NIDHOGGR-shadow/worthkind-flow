@@ -239,6 +239,27 @@ def check_staff_v1(browser, base):
             assert request.post_data_json=={"action":"acknowledge"}
             state["handover"].update(state="acknowledged",decided_at="2026-11-26T15:01:00Z",decided_by=MEMBER_ID)
             route.fulfill(json={"id":TICKET_ID,"state":"acknowledged","duplicate":False})
+        elif path == prefix + "/attendance":
+            attendance={"shift_id":TICKET_ID,"membership_id":MEMBER_ID,"starts_at":"2026-11-25T08:00:00Z","ends_at":"2026-11-25T16:00:00Z","checked_in_at":state.get("checked_in_at"),"checked_out_at":state.get("checked_out_at")}
+            route.fulfill(json={"attendance":[attendance],"next_cursor":None})
+        elif path == prefix + "/shifts/" + TICKET_ID + "/attendance":
+            action=request.post_data_json["action"]
+            if action=="check_in":
+                state["checked_in_at"]="2026-11-25T08:00:00Z"
+            else:
+                assert action=="check_out"
+                state["checked_out_at"]="2026-11-25T16:00:00Z"
+            route.fulfill(json={"shift_id":TICKET_ID,"checked_in_at":state.get("checked_in_at"),"checked_out_at":state.get("checked_out_at"),"duplicate":False})
+        elif path == prefix + "/leave" and request.method == "POST":
+            body=request.post_data_json
+            state["leave"]={"id":TICKET_ID,"membership_id":MEMBER_ID,"starts_at":body["starts_at"],"ends_at":body["ends_at"],"leave_kind":body["leave_kind"],"state":"requested","created_at":"2026-11-26T16:00:00Z"}
+            route.fulfill(json={"id":TICKET_ID,"state":"requested","duplicate":False})
+        elif path == prefix + "/leave":
+            route.fulfill(json={"requests":[state["leave"]] if state.get("leave") else [],"next_cursor":None})
+        elif path == prefix + "/leave/" + TICKET_ID + "/decision":
+            assert request.post_data_json["action"]=="withdraw"
+            state["leave"]["state"]="withdrawn"
+            route.fulfill(json={"id":TICKET_ID,"state":"withdrawn","duplicate":False})
         elif path == prefix + "/schedule":
             route.fulfill(json={"members": [{"membership_id": MEMBER_ID, "role": "reception",
                                            "state": "active", "display_name": "Synthetic staff"}],
@@ -380,6 +401,18 @@ def check_staff_v1(browser, base):
     expect(page.locator("#staff-shifts")).to_contain_text("scheduled")
     page.get_by_role("button", name="Cancel shift").click()
     expect(page.locator("#staff-shifts")).to_contain_text("cancelled")
+    page.locator("#attendance-load").click()
+    page.get_by_role("button",name="Check in (own shift)",exact=True).click()
+    expect(page.locator("#attendance-list")).to_contain_text("Checked in")
+    page.get_by_role("button",name="Check out (own shift)",exact=True).click()
+    expect(page.locator("#attendance-list")).to_contain_text("Checked out")
+    page.locator("summary").filter(has_text="Request leave").click()
+    page.locator("#leave-start").fill("2026-12-02T08:00")
+    page.locator("#leave-end").fill("2026-12-03T08:00")
+    page.locator("#leave-send").click()
+    expect(page.locator("#leave-list")).to_contain_text("requested")
+    page.get_by_role("button",name="Withdraw own request",exact=True).click()
+    expect(page.locator("#leave-list")).to_contain_text("withdrawn")
     select_module("Room readiness")
     page.locator("#load-rooms").click()
     expect(page.locator("#staff-rooms")).to_contain_text("dirty")
@@ -536,6 +569,8 @@ def check_staff_v1(browser, base):
     expect(page.locator("#v1-cases")).to_be_empty()
     expect(page.locator("#v1-tickets")).to_be_empty()
     expect(page.locator("#staff-roster")).to_be_empty()
+    expect(page.locator("#attendance-list")).to_be_empty()
+    expect(page.locator("#leave-list")).to_be_empty()
     expect(page.locator("#handover-list")).to_be_empty()
     expect(page.locator("#handover-recipient option")).to_have_count(1)
     expect(page.locator("#profile-member option")).to_have_count(1)
