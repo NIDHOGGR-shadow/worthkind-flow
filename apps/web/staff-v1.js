@@ -5,6 +5,7 @@
   const node=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=String(text);if(cls)n.className=cls;return n;};
   const ctx=staffContext();
   let roster=null,rooms=null,range=null,propertyRows=[],propertyCursor=null;
+  let attendanceRows=[],attendanceCursor=null,attendanceRange=null,leaveRows=[],leaveCursor=null,pendingLeave=null;
   let handoverRows=[],handoverPeople=[],handoverCursor=null,peopleCursor=null,pendingHandover=null;
   let session,api,view="cases",cases=null,tickets=null,settings=null,selectedCase=null,pendingTicket=null,expiryTimer,authBusy=false;
   const randomKey=()=>Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,"0")).join("");
@@ -15,7 +16,7 @@
   const evidence=initProviderEvidence({session:()=>session,ctx,run,mutate});
   const documents=initPrivateDocuments({session:()=>session,ctx,run});
   const aiStudio=initAiStudio({session:()=>session,ctx,run});
-  function clearData(){clearHandovers();
+  function clearData(){clearWorkforce();clearHandovers();
     commerce.clear();management.clear();native.clear();evidence.clear();documents.clear();aiStudio.clear();
     roster=null;rooms=null;range=null;el("staff-roster").replaceChildren();el("staff-shifts").replaceChildren();el("staff-rooms").replaceChildren();el("staff-profile-form").reset();el("shift-form").reset();el("schedule-range").reset();renderStaffSelectors();
     cases=null;tickets=null;settings=null;selectedCase=null;el("case-search").value="";el("ticket-search").value="";say("ticket-summary","");el("case-filter").value="";el("ticket-filter").value="";el("ticket-status-filter").value="";
@@ -34,7 +35,7 @@
     el("ticket-fields").disabled=locked||!!pendingTicket;
     el("ticket-create").textContent=pendingTicket?"Retry unchanged ticket":"Create ticket";
     el("ticket-discard").hidden=!pendingTicket;
-    handoverControls(locked);commerce.controls();management.controls();native.controls();evidence.controls();documents.controls();aiStudio.controls();
+    workforceControls(locked);handoverControls(locked);commerce.controls();management.controls();native.controls();evidence.controls();documents.controls();aiStudio.controls();
   }
   function clearProperties(){propertyRows=[];propertyCursor=null;el("property-discovery-list").replaceChildren();el("property-more").hidden=true;say("property-discovery-status","Find properties linked to your account.");}
   function localExit(message){clearProperties();
@@ -165,7 +166,7 @@
     if(!ctx.slug){say("staff-message","Select a hotel code first.");return false;}
     const stamp=ctx.stamp();say("staff-message",loading);
     try{const task=ctx.run(op);controls();const data=await task;if(!ctx.isCurrent(stamp)||!session.signedIn)return false;apply(data);if(el("staff-message").textContent===loading)say("staff-message","");return true;}
-    catch(e){if(!ctx.isCurrent(stamp))return false;if(e.status===401){localExit("Session expired or rejected. Sign in again.");return false;}if(e.status===403){clearHandovers();commerce.clear();management.clear();native.clear();evidence.clear();documents.clear();aiStudio.clear();roster=null;rooms=null;renderSchedule();renderRooms();cases=null;tickets=null;settings=null;renderCases();renderTickets();el("settings-form").hidden=true;say("case-summary","Access must be verified again.");say("membership-result","");}say("staff-message",e.message);return false;}
+    catch(e){if(!ctx.isCurrent(stamp))return false;if(e.status===401){localExit("Session expired or rejected. Sign in again.");return false;}if(e.status===403){clearWorkforce();clearHandovers();commerce.clear();management.clear();native.clear();evidence.clear();documents.clear();aiStudio.clear();roster=null;rooms=null;renderSchedule();renderRooms();cases=null;tickets=null;settings=null;renderCases();renderTickets();el("settings-form").hidden=true;say("case-summary","Access must be verified again.");say("membership-result","");}say("staff-message",e.message);return false;}
     finally{controls();}
   }
   async function loadCases(){
@@ -177,6 +178,18 @@
   function iso(value){const d=new Date(value);if(!Number.isFinite(d.getTime()))throw staffError("Select a valid date and time.");return d.toISOString();}
   function dateLabel(value){const d=new Date(value);return Number.isFinite(d.getTime())?d.toLocaleString():String(value);}
   function renderStaffSelectors(){for(const id of ["profile-member","shift-member"]){const select=el(id),previous=select.value;select.replaceChildren(new Option("Choose staff member",""));for(const m of (roster?.members||[]).filter(x=>x.state==="active")){const name=m.display_name||m.employee_reference||("Staff member "+m.membership_id.slice(0,8));select.append(new Option(name+" · "+describe(m.role)+(m.display_name&&m.employee_reference?" · "+m.employee_reference:""),m.membership_id));}if([...select.options].some(o=>o.value===previous))select.value=previous;}}
+
+  function workforceControls(locked=ctx.busy||authBusy){el("leave-fields").disabled=locked||!!pendingLeave;el("leave-send").textContent=pendingLeave?"Retry unchanged leave request":"Request leave";el("leave-discard").hidden=!pendingLeave;el("attendance-more").hidden=!attendanceCursor;el("leave-more").hidden=!leaveCursor;}
+  function clearWorkforce(){attendanceRows=[];attendanceCursor=null;attendanceRange=null;leaveRows=[];leaveCursor=null;pendingLeave=null;el("attendance-list").replaceChildren();el("leave-list").replaceChildren();el("leave-form").reset();workforceControls();}
+  function staffName(id){return roster?.members.find(m=>m.membership_id===id)?.display_name||"Staff "+id.slice(0,8);}
+  function workforceButton(label,fn){const b=node("button",label,"button secondary");b.type="button";b.addEventListener("click",fn);return b;}
+  function renderAttendance(){const root=el("attendance-list");root.replaceChildren();if(!attendanceRows.length)root.append(node("p","No scheduled shifts returned for this period."));for(const r of attendanceRows){const card=node("article",undefined,"staff-record");card.append(node("h3",staffName(r.membership_id)),node("p",dateLabel(r.starts_at)+" to "+dateLabel(r.ends_at)),node("p",r.checked_out_at?"Checked out":r.checked_in_at?"Checked in":"Not checked in","staff-meta"));if(r.checked_in_at)card.append(node("p","In: "+dateLabel(r.checked_in_at)));if(r.checked_out_at)card.append(node("p","Out: "+dateLabel(r.checked_out_at)));if(!r.checked_out_at){const action=r.checked_in_at?"check_out":"check_in";card.append(workforceButton(action==="check_in"?"Check in (own shift)":"Check out (own shift)",async()=>{if(ctx.busy||!confirm("Record attendance for your own shift?"))return;const ok=await run(slug=>api.attendanceAction(slug,r.shift_id,action),d=>say("staff-message","Attendance recorded at "+dateLabel(action==="check_in"?d.checked_in_at:d.checked_out_at)+"."));if(ok)await loadAttendance(false,true);}));}root.append(card);}}
+  async function loadAttendance(more=false,keepRange=false){if(ctx.busy)return;if(!more&&!keepRange){try{attendanceRange={start:iso(el("schedule-start").value),end:iso(el("schedule-end").value)};}catch(e){say("staff-message",e.message);return;}attendanceRows=[];attendanceCursor=null;el("attendance-list").replaceChildren();}if(!attendanceRange)return;const cursor=more?attendanceCursor:null;if(more&&!cursor)return;await run(slug=>api.attendance(slug,attendanceRange.start,attendanceRange.end,cursor),d=>{const map=new Map((more?attendanceRows:[]).map(r=>[r.shift_id,r]));for(const r of d.attendance)map.set(r.shift_id,r);attendanceRows=[...map.values()];attendanceCursor=d.next_cursor;renderAttendance();},"Loading attendance…");}
+  function renderLeave(){const root=el("leave-list");root.replaceChildren();if(!leaveRows.length)root.append(node("p","No leave requests returned."));const role=propertyRows.find(p=>p.slug===ctx.slug)?.role||cases?.staff_role;for(const r of leaveRows){const card=node("article",undefined,"staff-record");card.append(node("h3",staffName(r.membership_id)),node("p",describe(r.leave_kind)+" · "+describe(r.state),"staff-meta"),node("p",dateLabel(r.starts_at)+" to "+dateLabel(r.ends_at)));const actions=r.state==="requested"?["withdraw",...(!role||["owner","manager","hr"].includes(role)?["approve","decline"]:[])]:r.state==="approved"&&(!role||["owner","manager","hr"].includes(role))?["cancel"]:[];for(const action of actions){card.append(workforceButton(({withdraw:"Withdraw own request",approve:"Approve leave",decline:"Decline leave",cancel:"Cancel approved leave"})[action],async()=>{if(ctx.busy||!confirm("Confirm "+action+"? The server checks eligibility and overlapping shifts."))return;const ok=await run(slug=>api.decideLeave(slug,r.id,action),d=>say("staff-message","Leave "+d.state+" recorded."));if(ok)await loadLeave();}));}root.append(card);}}
+  async function loadLeave(more=false){if(ctx.busy)return;const cursor=more?leaveCursor:null;if(more&&!cursor)return;await run(slug=>api.leaveRequests(slug,cursor),d=>{const map=new Map((more?leaveRows:[]).map(r=>[r.id,r]));for(const r of d.requests)map.set(r.id,r);leaveRows=[...map.values()];leaveCursor=d.next_cursor;renderLeave();},"Loading leave requests…");}
+  el("attendance-load").addEventListener("click",()=>loadAttendance());el("attendance-more").addEventListener("click",()=>loadAttendance(true));el("leave-load").addEventListener("click",()=>loadLeave());el("leave-more").addEventListener("click",()=>loadLeave(true));
+  el("leave-form").addEventListener("submit",async e=>{e.preventDefault();if(ctx.busy||!ctx.slug)return;if(!pendingLeave){try{const starts_at=iso(el("leave-start").value),ends_at=iso(el("leave-end").value);if(Date.parse(ends_at)<=Date.parse(starts_at)||Date.parse(ends_at)-Date.parse(starts_at)>93*86400000)throw Error("Choose a valid leave range up to 93 days.");if(!confirm("Submit your leave request?"))return;pendingLeave={starts_at,ends_at,leave_kind:el("leave-kind").value,request_key:crypto.randomUUID()};}catch(err){say("staff-message",err.message);return;}}const stamp=ctx.stamp(),ok=await run(slug=>api.requestLeave(slug,pendingLeave),d=>{pendingLeave=null;el("leave-form").reset();say("staff-message","Leave "+d.state+" recorded by server.");},"Recording leave request…");workforceControls();if(ok&&ctx.isCurrent(stamp))await loadLeave();});
+  el("leave-discard").addEventListener("click",()=>{if(!ctx.busy&&pendingLeave&&confirm("Discard the local retry key? This does not cancel a server request.")){pendingLeave=null;workforceControls();}});
   function renderSchedule(){renderStaffSelectors();
     const root=el("staff-roster"),shifts=el("staff-shifts");root.replaceChildren();shifts.replaceChildren();if(!roster)return;
     if(!roster.members.length)root.append(node("p","No authorized staff records returned.","case-empty"));
@@ -228,7 +241,7 @@
   function selectProperty(slug){
     if(ctx.busy||authBusy||!session?.signedIn)return false;
     if(!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)||slug.length>100)return false;
-    if((pendingHandover||pendingTicket||commerce.pending||management.pending||native.pending||evidence.pending||documents.pending||aiStudio.pending)&&!confirm("An unconfirmed operation may already exist. Switching property discards its local retry key. Continue?"))return false;
+    if((pendingLeave||pendingHandover||pendingTicket||commerce.pending||management.pending||native.pending||evidence.pending||documents.pending||aiStudio.pending)&&!confirm("An unconfirmed operation may already exist. Switching property discards its local retry key. Continue?"))return false;
     ctx.select(slug);clearData();el("staff-slug").value=slug;
     const p=propertyRows.find(x=>x.slug===slug);
     say("property-label",p?p.display_name+" · "+describe(p.role)+" · "+p.time_zone:"Selected: "+slug+" · Access checked by each server request.");say("staff-message","");controls();return true;
@@ -270,7 +283,7 @@
   async function membership(action){
     if(ctx.busy)return;const subject=el("member-subject").value.trim(),role=el("member-role").value;
     if(action==="revoke"&&!confirm("Revoke this identity's membership of "+ctx.slug+"?"))return;
-    await run(slug=>api.membership(slug,action,subject,role),d=>{say("membership-result","Membership "+d.membership_id+" · "+d.role+" · "+d.state);say("staff-message","Membership command confirmed. No account or email delivery is implied.");if(action==="revoke"){clearHandovers();commerce.clear();management.clear();native.clear();evidence.clear();documents.clear();aiStudio.clear();roster=null;rooms=null;renderSchedule();renderRooms();cases=null;tickets=null;settings=null;renderCases();renderTickets();el("settings-form").hidden=true;}});
+    await run(slug=>api.membership(slug,action,subject,role),d=>{say("membership-result","Membership "+d.membership_id+" · "+d.role+" · "+d.state);say("staff-message","Membership command confirmed. No account or email delivery is implied.");if(action==="revoke"){clearWorkforce();clearHandovers();commerce.clear();management.clear();native.clear();evidence.clear();documents.clear();aiStudio.clear();roster=null;rooms=null;renderSchedule();renderRooms();cases=null;tickets=null;settings=null;renderCases();renderTickets();el("settings-form").hidden=true;}});
   }
   el("membership-form").addEventListener("submit",e=>{e.preventDefault();membership("invite");});el("accept-membership").addEventListener("click",()=>membership("accept"));el("revoke-membership").addEventListener("click",()=>membership("revoke"));
   el("login-form").addEventListener("submit",async e=>{
@@ -278,7 +291,7 @@
     try{await session.signIn(el("email").value.trim(),password);el("login-panel").hidden=true;el("staff-workspace").hidden=false;el("signout").hidden=false;showView("cases");expiryTimer=setTimeout(()=>localExit("Session expired. Sign in again."),Math.max(0,session.expiresAt-Date.now()));el("staff-slug").focus();}
     catch(e){say("login-status",e.message);}finally{authBusy=false;controls();}
   });
-  el("signout").addEventListener("click",async()=>{if(authBusy)return;if((pendingHandover||pendingTicket||commerce.pending||management.pending||native.pending||evidence.pending||documents.pending||aiStudio.pending)&&!confirm("A ticket, dining order, stock operation, room hold, provider command or document upload is unconfirmed. Signing out discards its local retry key, not the server record. Continue?"))return;authBusy=true;const task=session.signOut();localExit("Signed out of this workspace.");const revoked=await task;authBusy=false;controls();if(!revoked)say("login-status","Signed out locally. Provider session revocation could not be confirmed.");});
+  el("signout").addEventListener("click",async()=>{if(authBusy)return;if((pendingLeave||pendingHandover||pendingTicket||commerce.pending||management.pending||native.pending||evidence.pending||documents.pending||aiStudio.pending)&&!confirm("A ticket, dining order, stock operation, room hold, provider command or document upload is unconfirmed. Signing out discards its local retry key, not the server record. Continue?"))return;authBusy=true;const task=session.signOut();localExit("Signed out of this workspace.");const revoked=await task;authBusy=false;controls();if(!revoked)say("login-status","Signed out locally. Provider session revocation could not be confirmed.");});
   window.addEventListener("pagehide",()=>{clearProperties();clearTimeout(expiryTimer);session?.clear();ctx.select("");clearData();});
   window.addEventListener("pageshow",e=>{if(e.persisted)localExit("Sign in again to access staff records.");});
   (async()=>{try{const r=await fetch(new URL("./staff-auth-config.json",location.href),{cache:"no-store",credentials:"same-origin",redirect:"error"});if(!r.ok)throw staffError("Staff identity configuration unavailable.");session=staffSession(window.fetch.bind(window),await r.json());api=staffApi(window.fetch.bind(window),session);say("login-status","Sign in with your confirmed hotel identity.");}catch{say("login-status","Staff sign-in is unavailable until an authorized identity provider is configured.");}finally{controls();}})();
