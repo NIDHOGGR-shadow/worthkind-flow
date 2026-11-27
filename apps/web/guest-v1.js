@@ -17,7 +17,7 @@
     if(journey.active&&(view==="request"||view==="recover"))view="v1-track";
     page.dataset.guestView=view;
     el("guest-journey-bar").hidden=!journey.active;
-    say("guest-journey-hotel",journey.active?.slug||"");
+    say("guest-journey-hotel",journey.active?.slug||"");say("guest-stay-property",journey.active?.slug?"Hotel · "+journey.active.slug:"");
     const nav=document.querySelector(".guest-nav a[href='#recover']");
     if(nav)nav.setAttribute("aria-current",privateViews.has(view)||view==="recover"?"page":"false");
     document.querySelectorAll(".guest-nav a,.guest-journey-bar a").forEach(a=>{
@@ -52,7 +52,7 @@
     resolutionControls();
     el("v1-refresh").disabled=resolutionBusy||journey.busy||commerce.busy||management.busy||native.busy||!journey.active;
     el("v1-new").disabled=resolutionBusy||journey.busy||commerce.busy||management.busy||native.busy;
-    document.querySelectorAll("[data-service]").forEach(b=>{b.disabled=journey.busy||journey.pending;const active=!!journey.active;if(b.dataset.service==="human")b.textContent=active?"View my request":"Contact reception";else{const text=b.querySelector("span:not(.service-arrow)");if(text){if(!text.dataset.original)text.dataset.original=text.textContent;text.textContent=active?(["booking","events"].includes(b.dataset.service)?"Manage your stay and venue requests":"View your current request or start a new one"):text.dataset.original;}}});
+    document.querySelectorAll("[data-service]").forEach(b=>{b.disabled=journey.busy||journey.pending;const active=!!journey.active;if(b.dataset.service==="human")b.textContent=active?"View my request":"Contact reception";else{const text=b.querySelector("span:not(.service-arrow)");if(text){if(!text.dataset.original)text.dataset.original=text.textContent;text.textContent=active?((["booking","events"].includes(b.dataset.service)||(b.dataset.service==="food"&&["booking","food"].includes(journey.active?.kind)))?"Manage your stay, dining and venue requests":"View your current request or start a new one"):text.dataset.original;}}});
   }
   function render(result,focus){
     const active=journey.active;
@@ -66,6 +66,7 @@
     if(focus){el("v1-receipt").hidden=true;el("v1-copy").hidden=true;say("receipt-copy-status","");el("v1-reveal").setAttribute("aria-expanded","false");say("v1-reveal","Show private receipt");showView("v1-track",true);}
   }
   document.querySelectorAll("[data-service]").forEach(b=>b.addEventListener("click",()=>{if(journey.busy||journey.pending)return;if(journey.active){showView(["booking","events"].includes(b.dataset.service)?"guest-commerce":"v1-track",true);return;}el("v1-kind").value=b.dataset.service;showView("request",true);el("v1-hotel").focus();}));
+  el("stay-open-reservations").addEventListener("click",()=>showView("native-guest",true));
   el("v1-form").addEventListener("submit",async e=>{
     e.preventDefault();if(journey.busy||journey.active)return;
     const fields={kind:el("v1-kind").value,name:el("v1-name").value.trim(),contact:el("v1-contact").value.trim(),details:el("v1-details").value.trim()};
@@ -99,7 +100,7 @@
   });
   el("v1-new").addEventListener("click",()=>{
     if(journey.busy||commerce.busy||management.busy||native.busy||!journey.active)return;
-    if((commerce.pending||management.pending)&&!window.confirm("An unconfirmed stay, venue, feedback or application request may exist. Starting over discards its local retry proof. Continue?"))return;
+    if((commerce.pending||management.pending)&&!window.confirm("An unconfirmed stay, dining, venue, feedback or application request may exist. Starting over discards its local retry proof. Continue?"))return;
     if(!window.confirm("Have you saved the private receipt? Starting over removes it from this page."))return;
     clearResolution();journey.reset();commerce.reset();management.reset();native.reset();el("v1-form").reset();el("v1-recover-form").reset();el("v1-track").hidden=true;el("v1-receipt").hidden=true;el("v1-copy").hidden=true;say("receipt-copy-status","");el("v1-reveal").setAttribute("aria-expanded","false");say("v1-reveal","Show private receipt");say("v1-receipt","");say("v1-reply","");say("v1-case-status","");say("v1-recover-status","");say("v1-submit-status","Ready for a new request.");controls();showView("request",true);el("v1-hotel").focus();
   });
