@@ -7,6 +7,7 @@
   let roster=null,rooms=null,range=null,propertyRows=[],propertyCursor=null;
   let attendanceRows=[],attendanceCursor=null,attendanceRange=null,leaveRows=[],leaveCursor=null,pendingLeave=null;
   let handoverRows=[],handoverPeople=[],handoverCursor=null,peopleCursor=null,pendingHandover=null;
+  let replyDrafts=new Map();
   let session,api,view="cases",cases=null,tickets=null,settings=null,selectedCase=null,pendingTicket=null,expiryTimer,authBusy=false;
   const randomKey=()=>Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,"0")).join("");
   const describe=s=>String(s).replaceAll("_"," ");
@@ -16,7 +17,7 @@
   const evidence=initProviderEvidence({session:()=>session,ctx,run,mutate});
   const documents=initPrivateDocuments({session:()=>session,ctx,run});
   const aiStudio=initAiStudio({session:()=>session,ctx,run});
-  function clearData(){clearWorkforce();clearHandovers();
+  function clearData(){replyDrafts.clear();clearWorkforce();clearHandovers();
     commerce.clear();management.clear();native.clear();evidence.clear();documents.clear();aiStudio.clear();
     roster=null;rooms=null;range=null;el("staff-roster").replaceChildren();el("staff-shifts").replaceChildren();el("staff-rooms").replaceChildren();el("staff-profile-form").reset();el("shift-form").reset();el("schedule-range").reset();renderStaffSelectors();
     cases=null;tickets=null;settings=null;selectedCase=null;el("case-search").value="";el("ticket-search").value="";say("ticket-summary","");el("case-filter").value="";el("ticket-filter").value="";el("ticket-status-filter").value="";
@@ -73,14 +74,21 @@
       const message=node("div",undefined,"communication-message");message.append(node("p","Guest request","communication-author"),node("p",c.details||"No request details returned."));card.append(message);
       if(typeof c.staff_reply==="string"&&c.staff_reply.trim()){const reply=node("div",undefined,"communication-message staff-reply");reply.append(node("p","Latest recorded staff response","communication-author"),node("p",c.staff_reply));card.append(reply);}
       if(c.status==="resolved"){const closure=node("div",undefined,"communication-message");closure.append(node("p","Guest confirmation","communication-author"));const status=node("p","Check whether the guest confirmed resolution.");const b=node("button","Check guest confirmation","button secondary");b.type="button";b.addEventListener("click",()=>{if(ctx.busy)return;run(slug=>api.resolution(slug,c.id),d=>{status.textContent=d.guest_confirmed?"Guest confirmed resolution.":d.awaiting_guest_confirmation?"Awaiting guest confirmation.":d.guest_decision==="reopen"?"Guest reopened this request. Refresh your inbox.":"No confirmation recorded.";});});closure.append(status,b);card.append(closure);}
+      if(["responded","escalated","resolved"].includes(c.status)){
+        const box=node("details"),title=node("summary","Service email notifications"),root=node("div");box.append(title,node("p","Delivery states come from the notification service. Queueing requires verified contact evidence and guest consent."),root);
+        const refresh=node("button","Refresh notification records","button secondary");refresh.type="button";box.insertBefore(refresh,root);
+        const labels={not_queued:"Not queued",pending:"Queued, not sent",accepted:"Provider accepted, delivery unconfirmed",delivered:"Provider reports delivered",failed:"Delivery failed",unknown:"Delivery outcome unknown",suppressed:"Suppressed"};
+        async function load(){if(ctx.busy)return;await run(slug=>api.notifications(slug,c.id),rows=>{root.replaceChildren();if(!rows.length)root.append(node("p","No eligible service events returned."));for(const n of rows){const entry=node("article",undefined,"staff-record");entry.append(node("h4",n.event_type==="case_responded"?"Staff response":"Staff resolution"),node("p",dateLabel(n.created_at),"staff-meta"),node("p",labels[n.state]));if(n.state==="not_queued"){const form=node("form"),label=node("label","Contact verification reference"),field=node("input"),send=node("button","Queue service email","button secondary");field.id="email-evidence-"+n.event_id;label.htmlFor=field.id;field.required=true;field.minLength=8;field.maxLength=240;field.autocomplete="off";send.type="submit";form.append(label,field,send);form.addEventListener("submit",async e=>{e.preventDefault();if(ctx.busy||field.value.trim().length<8||!confirm("Queue this service email using the verified contact reference? The server checks the guest's consent."))return;const ok=await run(slug=>api.queueNotification(slug,c.id,n.event_id,field.value.trim()),d=>say("staff-message",labels[d.state]+". Verify the delivery record before reporting success."));if(ok)await load();});entry.append(form);}root.append(entry);}},"Refreshing notification records…");}
+        refresh.addEventListener("click",load);card.append(box);
+      }
       const ref=node("details"),refTitle=node("summary","Request reference");ref.append(refTitle,node("p",c.id,"staff-meta"));card.append(ref);
       const ticketButton=node("button","Create linked department task","button secondary");ticketButton.type="button";ticketButton.addEventListener("click",()=>{if(ctx.busy||pendingTicket)return;if(["ticket-subject","ticket-description","ticket-origin"].some(id=>el(id).value.trim())&&!confirm("Replace your unfinished department task draft?"))return;el("create-ticket").reset();el("ticket-origin").value=c.id;el("ticket-subject").value=("Guest request: "+describe(c.kind)).slice(0,160);el("ticket-description").value=(c.details||"Follow up on this guest request.").slice(0,3000);el("ticket-category").value="reception";showView("tickets");el("create-ticket").closest("details").open=true;el("ticket-subject").focus();say("staff-message","Review the department and share only the details needed to complete this task.");});card.append(ticketButton);
       if(c.status!=="resolved"){const handover=node("button","Prepare handover","button secondary");handover.type="button";handover.addEventListener("click",()=>{if(ctx.busy||pendingHandover)return;el("handover-panel").open=true;renderHandoverCases();el("handover-case").value=c.id;el("handover-note").focus();});card.append(handover);}
       if(c.status==="queued"){const b=node("button","Claim case","button primary");b.type="button";b.addEventListener("click",()=>mutate(()=>api.caseAction(ctx.slug,c.id,"claim"),loadCases,"Case claimed by server."));card.append(b);}
       if(c.status==="claimed"){
-        const form=node("form"),label=node("label","Record a response"),field=node("textarea");field.id="reply-"+c.id;label.htmlFor=field.id;field.required=true;field.minLength=2;field.maxLength=3000;field.rows=3;
+        const form=node("form"),label=node("label","Record a response"),field=node("textarea");field.id="reply-"+c.id;label.htmlFor=field.id;field.required=true;field.minLength=2;field.maxLength=3000;field.rows=3;field.value=replyDrafts.get(c.id)||"";field.addEventListener("input",()=>replyDrafts.set(c.id,field.value));
         const b=node("button","Record response","button primary");b.type="submit";form.append(label,field,b);
-        form.addEventListener("submit",e=>{e.preventDefault();if(field.value.trim().length<2)return;mutate(()=>api.caseAction(ctx.slug,c.id,"respond",field.value.trim()),loadCases,"Response recorded. External delivery is not confirmed.");});card.append(form);
+        form.addEventListener("submit",async e=>{e.preventDefault();if(ctx.busy||field.value.trim().length<2)return;const ok=await run(slug=>api.caseAction(slug,c.id,"respond",field.value.trim()),()=>{replyDrafts.delete(c.id);say("staff-message","Response recorded. External delivery is not confirmed.");});if(ok)await loadCases();});card.append(form);
       }
       const allowed={claimed:["transfer","escalate"],responded:["transfer","escalate","resolve"],escalated:["transfer","resolve"]}[c.status]||[];
       if(allowed.length){
@@ -166,7 +174,7 @@
     if(!ctx.slug){say("staff-message","Select a hotel code first.");return false;}
     const stamp=ctx.stamp();say("staff-message",loading);
     try{const task=ctx.run(op);controls();const data=await task;if(!ctx.isCurrent(stamp)||!session.signedIn)return false;apply(data);if(el("staff-message").textContent===loading)say("staff-message","");return true;}
-    catch(e){if(!ctx.isCurrent(stamp))return false;if(e.status===401){localExit("Session expired or rejected. Sign in again.");return false;}if(e.status===403){clearWorkforce();clearHandovers();commerce.clear();management.clear();native.clear();evidence.clear();documents.clear();aiStudio.clear();roster=null;rooms=null;renderSchedule();renderRooms();cases=null;tickets=null;settings=null;renderCases();renderTickets();el("settings-form").hidden=true;say("case-summary","Access must be verified again.");say("membership-result","");}say("staff-message",e.message);return false;}
+    catch(e){if(!ctx.isCurrent(stamp))return false;if(e.status===401){localExit("Session expired or rejected. Sign in again.");return false;}if(e.status===403){replyDrafts.clear();clearWorkforce();clearHandovers();commerce.clear();management.clear();native.clear();evidence.clear();documents.clear();aiStudio.clear();roster=null;rooms=null;renderSchedule();renderRooms();cases=null;tickets=null;settings=null;renderCases();renderTickets();el("settings-form").hidden=true;say("case-summary","Access must be verified again.");say("membership-result","");}say("staff-message",e.message);return false;}
     finally{controls();}
   }
   async function loadCases(){
@@ -283,7 +291,7 @@
   async function membership(action){
     if(ctx.busy)return;const subject=el("member-subject").value.trim(),role=el("member-role").value;
     if(action==="revoke"&&!confirm("Revoke this identity's membership of "+ctx.slug+"?"))return;
-    await run(slug=>api.membership(slug,action,subject,role),d=>{say("membership-result","Membership "+d.membership_id+" · "+d.role+" · "+d.state);say("staff-message","Membership command confirmed. No account or email delivery is implied.");if(action==="revoke"){clearWorkforce();clearHandovers();commerce.clear();management.clear();native.clear();evidence.clear();documents.clear();aiStudio.clear();roster=null;rooms=null;renderSchedule();renderRooms();cases=null;tickets=null;settings=null;renderCases();renderTickets();el("settings-form").hidden=true;}});
+    await run(slug=>api.membership(slug,action,subject,role),d=>{say("membership-result","Membership "+d.membership_id+" · "+d.role+" · "+d.state);say("staff-message","Membership command confirmed. No account or email delivery is implied.");if(action==="revoke"){replyDrafts.clear();clearWorkforce();clearHandovers();commerce.clear();management.clear();native.clear();evidence.clear();documents.clear();aiStudio.clear();roster=null;rooms=null;renderSchedule();renderRooms();cases=null;tickets=null;settings=null;renderCases();renderTickets();el("settings-form").hidden=true;}});
   }
   el("membership-form").addEventListener("submit",e=>{e.preventDefault();membership("invite");});el("accept-membership").addEventListener("click",()=>membership("accept"));el("revoke-membership").addEventListener("click",()=>membership("revoke"));
   el("login-form").addEventListener("submit",async e=>{
