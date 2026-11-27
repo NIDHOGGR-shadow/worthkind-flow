@@ -14,6 +14,7 @@ const allowed=[
  ["POST","/staff/documents"],["GET","/staff/documents/"+UUID],["GET","/staff/ai/policy"],["PUT","/staff/ai/policy"],["PUT","/staff/ai/sources/"+UUID],["POST","/staff/ai/chat"],["POST","/ai/chat"],["POST","/ai/voice"],["GET","/staff/ai/sources"],["GET","/staff/ai/usage"],["GET","/staff/ai/insights"],["POST","/staff/ai/alerts/"+UUID+"/acknowledge"],["GET","/staff/ai/ticket-proposals"],["POST","/staff/ai/ticket-proposals"],["POST","/staff/ai/ticket-proposals/"+UUID+"/decision"],
  ["GET","/enquiries/"+UUID],["POST","/enquiries"],
  ["GET","/staff/cases/"+UUID+"/resolution"],["GET","/guest/cases/"+UUID+"/resolution"],["POST","/guest/cases/"+UUID+"/resolution"],
+ ["GET","/staff/cases/"+UUID+"/notifications"],["POST","/staff/cases/"+UUID+"/notifications"],
  ["GET","/staff/cases"],["POST","/staff/cases/"+UUID+"/(?:claim|respond|control)"],
  ["GET","/staff/tickets"],["POST","/staff/tickets"],["GET","/staff/tickets/"+UUID],["POST","/staff/tickets/"+UUID+"/transition"],
  ["GET","/staff/settings"],["PUT","/staff/settings"],["POST","/staff/memberships/(?:invite|accept|revoke)"],
