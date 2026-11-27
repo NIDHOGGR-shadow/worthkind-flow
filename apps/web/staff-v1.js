@@ -42,7 +42,7 @@
   function localExit(message){clearProperties();
     clearTimeout(expiryTimer);session?.clear();ctx.select("");clearData();
     el("staff-slug").value="";el("password").value="";el("email").value="";
-    say("property-label","No hotel selected.");say("staff-message","");
+    say("workspace-title","Staff workspace");say("property-label","No hotel selected.");say("staff-message","");
     el("staff-workspace").hidden=true;el("login-panel").hidden=false;el("signout").hidden=true;
     say("login-status",message);controls();
   }
@@ -252,11 +252,12 @@
     if((pendingLeave||pendingHandover||pendingTicket||commerce.pending||management.pending||native.pending||evidence.pending||documents.pending||aiStudio.pending)&&!confirm("An unconfirmed operation may already exist. Switching property discards its local retry key. Continue?"))return false;
     ctx.select(slug);clearData();el("staff-slug").value=slug;
     const p=propertyRows.find(x=>x.slug===slug);
+    say("workspace-title",p?p.display_name:"Staff workspace");
     say("property-label",p?p.display_name+" · "+describe(p.role)+" · "+p.time_zone:"Selected: "+slug+" · Access checked by each server request.");say("staff-message","");controls();return true;
   }
   function renderProperties(){
     const root=el("property-discovery-list");root.replaceChildren();
-    for(const p of propertyRows){const card=node("article",undefined,"property-choice");const info=node("div");info.append(node("strong",p.display_name),node("p",describe(p.role)+" · "+p.time_zone+(p.membership_state==="invited"?" · Invitation pending":"")));const b=node("button",p.membership_state==="invited"?"Review invitation":"Open hotel","button secondary");b.type="button";b.addEventListener("click",()=>{if(!selectProperty(p.slug))return;if(p.membership_state==="invited"){showView("memberships");say("staff-message","Accept your invitation before accessing hotel records.");}else{showView(["owner","manager"].includes(p.role)?"management":"cases");}});card.append(info,b);root.append(card);}
+    for(const p of propertyRows){const card=node("article",undefined,"property-choice");const info=node("div");info.append(node("strong",p.display_name),node("p",describe(p.role)+" · "+p.time_zone+(p.membership_state==="invited"?" · Invitation pending":"")));const b=node("button",p.membership_state==="invited"?"Review invitation":"Open hotel","button secondary");b.type="button";b.addEventListener("click",()=>{if(!selectProperty(p.slug))return;if(p.membership_state==="invited"){showView("memberships");say("staff-message","Accept your invitation before accessing hotel records.");}else{showView(({owner:"management",manager:"management",reception:"cases",housekeeping:"rooms",maintenance:"tickets",kitchen:"dining",finance:"finance",hr:"schedule",procurement:"procurement",events:"events",it:"tickets"})[p.role]||"cases");}});card.append(info,b);root.append(card);}
     el("property-more").hidden=!propertyCursor;
     say("property-discovery-status",propertyRows.length?propertyRows.length+" linked hotel"+(propertyRows.length===1?"":"s")+(propertyCursor?" · More available":""):"No linked hotels returned. Ask your hotel administrator about an invitation.");
   }
