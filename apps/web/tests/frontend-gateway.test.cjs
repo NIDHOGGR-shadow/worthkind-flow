@@ -28,9 +28,12 @@ test("real HTTP gateway serves only approved assets, forwards approved versioned
   const staff=await fetch(base+"/staff");assert.equal(staff.status,200);assert.match(await staff.text(),/staff-v1-core.js/);assert.match(staff.headers.get("content-security-policy"),/frame-ancestors 'none'/);
   const auth=await fetch(base+"/staff-auth-config.json");assert.equal((await auth.json()).enabled,false);
   for(const url of ["/static/index.html","/static/app.js","/static/tests/staff-v1.test.cjs","/api/properties/demo-hotel/staff/enquiries","/api/v1/properties/hotel-a/staff/payments","/static/%2e%2e%2fserver.cjs"])assert.equal((await fetch(base+url)).status,404);
+  const platform=await fetch(base+"/platform");assert.equal(platform.status,200);assert.match(await platform.text(),/platform-crm.js/);
+  const crm="/api/v1/platform/crm/prospects";assert.equal((await fetch(base+crm)).status,401);assert.equal((await fetch(base+crm+"/unknown",{headers:{Authorization:"Bearer fixture.token"}})).status,404);
   assert.equal(seen.length,0);
   const req=await fetch(base+"/api/v1/properties/hotel-a/staff/cases",{headers:{Authorization:"Bearer synthetic.token",Cookie:"private=fixture","X-Staff-Key":"legacy","X-Forwarded-For":"192.0.2.1"}});
   assert.equal(req.status,200);assert.equal(req.headers.get("set-cookie"),null);assert.equal(req.headers.get("cache-control"),"no-store");assert.equal(seen[0].headers.authorization,"Bearer synthetic.token");assert.equal(seen[0].headers.cookie,undefined);assert.equal(seen[0].headers["x-staff-key"],undefined);assert.equal(seen[0].headers["x-forwarded-for"],undefined);
+  assert.equal((await fetch(base+crm,{headers:{Authorization:"Bearer fixture.token"}})).status,200);assert.equal(seen.at(-1).headers.authorization,"Bearer fixture.token");
   assert.equal((await fetch(base+"/api/v1/properties/redirect-test/staff/cases")).status,502);
   assert.equal((await fetch(base+"/api/v1/properties/html-test/staff/cases")).status,502);
   assert.equal((await fetch(base+"/api/v1/properties/hotel-a/staff/settings",{method:"PUT",headers:{"Content-Type":"text/html"},body:"test"})).status,415);
